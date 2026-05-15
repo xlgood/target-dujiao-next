@@ -34,13 +34,14 @@ type TelegramLoginPayload struct {
 
 // TelegramIdentityVerified Telegram 身份校验结果
 type TelegramIdentityVerified struct {
-	Provider       string
-	ProviderUserID string
-	Username       string
-	AvatarURL      string
-	FirstName      string
-	LastName       string
-	AuthAt         time.Time
+	Provider              string
+	ProviderUserID        string
+	ProviderUserIDAliases []string
+	Username              string
+	AvatarURL             string
+	FirstName             string
+	LastName              string
+	AuthAt                time.Time
 }
 
 type telegramReplaySetNXFunc func(ctx context.Context, key string, value interface{}, ttl time.Duration) (bool, error)

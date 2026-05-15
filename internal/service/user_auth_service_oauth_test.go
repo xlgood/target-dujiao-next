@@ -129,6 +129,60 @@ func TestLoginWithTelegramAllowsExistingIdentityWhenRegistrationDisabled(t *test
 	}
 }
 
+func TestLoginWithTelegramMigratesOIDCSubjectIdentityToTelegramID(t *testing.T) {
+	svc, db := setupTelegramOAuthTestService(t)
+
+	now := time.Now()
+	user := &models.User{
+		Email:        telegramidentity.BuildPlaceholderEmail("1234123412341234123"),
+		PasswordHash: "telegram-auto",
+		DisplayName:  "OIDC Existing",
+		Status:       constants.UserStatusActive,
+		CreatedAt:    now,
+		UpdatedAt:    now,
+	}
+	if err := db.Create(user).Error; err != nil {
+		t.Fatalf("create user failed: %v", err)
+	}
+	identity := &models.UserOAuthIdentity{
+		UserID:         user.ID,
+		Provider:       constants.UserOAuthProviderTelegram,
+		ProviderUserID: "1234123412341234123",
+		Username:       "old_oidc",
+		AuthAt:         &now,
+		CreatedAt:      now,
+		UpdatedAt:      now,
+	}
+	if err := db.Create(identity).Error; err != nil {
+		t.Fatalf("create identity failed: %v", err)
+	}
+
+	res, err := svc.loginWithVerifiedTelegram(&TelegramIdentityVerified{
+		Provider:              constants.UserOAuthProviderTelegram,
+		ProviderUserID:        "987654321",
+		ProviderUserIDAliases: []string{"1234123412341234123"},
+		Username:              "new_oidc",
+		AuthAt:                time.Now(),
+	})
+	if err != nil {
+		t.Fatalf("loginWithVerifiedTelegram returned error: %v", err)
+	}
+	if res.User == nil || res.User.ID != user.ID {
+		t.Fatalf("expected existing user %d, got %+v", user.ID, res.User)
+	}
+
+	var migrated models.UserOAuthIdentity
+	if err := db.First(&migrated, identity.ID).Error; err != nil {
+		t.Fatalf("load migrated identity failed: %v", err)
+	}
+	if migrated.ProviderUserID != "987654321" {
+		t.Fatalf("provider user id not migrated: %q", migrated.ProviderUserID)
+	}
+	if migrated.Username != "new_oidc" {
+		t.Fatalf("username not updated: %q", migrated.Username)
+	}
+}
+
 func TestTelegramMiniAppLoginReturnsRegistrationDisabledWhenCreatingNewUser(t *testing.T) {
 	svc, _ := setupTelegramOAuthTestService(t)
 	telegramSvc := NewTelegramAuthService(config.TelegramAuthConfig{

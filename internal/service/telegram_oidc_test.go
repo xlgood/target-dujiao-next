@@ -121,7 +121,7 @@ func TestCompleteOIDCLoginHappyPath(t *testing.T) {
 	claims := jwt.MapClaims{
 		"iss":                "https://oauth.telegram.org",
 		"aud":                clientID,
-		"sub":                "987654321",
+		"sub":                "1234123412341234123",
 		"iat":                now.Unix(),
 		"exp":                now.Add(time.Hour).Unix(),
 		"id":                 float64(987654321),
@@ -183,6 +183,9 @@ func TestCompleteOIDCLoginHappyPath(t *testing.T) {
 	}
 	if verified.ProviderUserID != "987654321" {
 		t.Fatalf("provider_user_id %q", verified.ProviderUserID)
+	}
+	if len(verified.ProviderUserIDAliases) != 1 || verified.ProviderUserIDAliases[0] != "1234123412341234123" {
+		t.Fatalf("provider_user_id aliases %#v", verified.ProviderUserIDAliases)
 	}
 	if verified.Username != "johndoe" {
 		t.Fatalf("username %q", verified.Username)

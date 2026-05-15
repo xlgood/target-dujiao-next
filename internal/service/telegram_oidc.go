@@ -14,6 +14,7 @@ import (
 	"math/big"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -311,12 +312,14 @@ func (s *TelegramAuthService) CompleteOIDCLogin(ctx context.Context, code, state
 		return nil, "", 0, fmt.Errorf("%w: %v", ErrTelegramOIDCIDTokenInvalid, err)
 	}
 
-	providerUserID := strings.TrimSpace(claims.Subject)
-	if providerUserID == "" {
-		providerUserID = strings.TrimSpace(claims.ID.String())
-	}
-	if providerUserID == "" || providerUserID == "0" {
+	providerUserID, idNum, err := telegramOIDCProviderUserID(claims)
+	if err != nil {
 		return nil, "", 0, ErrTelegramOIDCIDTokenInvalid
+	}
+	subject := strings.TrimSpace(claims.Subject)
+	var providerUserIDAliases []string
+	if subject != "" && subject != providerUserID {
+		providerUserIDAliases = append(providerUserIDAliases, subject)
 	}
 	firstName, lastName := splitTelegramName(claims.Name)
 	authAt := time.Now()
@@ -324,24 +327,30 @@ func (s *TelegramAuthService) CompleteOIDCLogin(ctx context.Context, code, state
 		authAt = claims.IssuedAt.Time
 	}
 
-	idNum := int64(0)
-	if n, perr := claims.ID.Int64(); perr == nil {
-		idNum = n
-	}
 	fp := sha256.Sum256([]byte(tokResp.IDToken))
 	if err := s.markTelegramReplay(ctx, idNum, hex.EncodeToString(fp[:8]), cfg.ReplayTTLSeconds); err != nil {
 		return nil, "", 0, err
 	}
 
 	return &TelegramIdentityVerified{
-		Provider:       constants.UserOAuthProviderTelegram,
-		ProviderUserID: providerUserID,
-		Username:       strings.TrimSpace(claims.PreferredUsername),
-		AvatarURL:      strings.TrimSpace(claims.Picture),
-		FirstName:      firstName,
-		LastName:       lastName,
-		AuthAt:         authAt,
+		Provider:              constants.UserOAuthProviderTelegram,
+		ProviderUserID:        providerUserID,
+		ProviderUserIDAliases: providerUserIDAliases,
+		Username:              strings.TrimSpace(claims.PreferredUsername),
+		AvatarURL:             strings.TrimSpace(claims.Picture),
+		FirstName:             firstName,
+		LastName:              lastName,
+		AuthAt:                authAt,
 	}, st.Intent, st.UserID, nil
+}
+
+// telegramOIDCProviderUserID 从 Telegram OIDC claims 中提取标准 Telegram 数字用户 ID。
+func telegramOIDCProviderUserID(claims telegramOIDCIDClaims) (string, int64, error) {
+	idNum, err := claims.ID.Int64()
+	if err != nil || idNum <= 0 {
+		return "", 0, ErrTelegramOIDCIDTokenInvalid
+	}
+	return strconv.FormatInt(idNum, 10), idNum, nil
 }
 
 func splitTelegramName(name string) (string, string) {
