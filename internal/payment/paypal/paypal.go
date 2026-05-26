@@ -144,9 +144,6 @@ func ValidateConfig(cfg *Config) error {
 	if _, err := url.ParseRequestURI(strings.TrimSpace(cfg.CancelURL)); err != nil {
 		return fmt.Errorf("%w: cancel_url is invalid", ErrConfigInvalid)
 	}
-	if strings.TrimSpace(cfg.WebhookID) == "" {
-		return fmt.Errorf("%w: webhook_id is required", ErrConfigInvalid)
-	}
 	return nil
 }
 

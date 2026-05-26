@@ -1,6 +1,9 @@
 package paypal
 
 import (
+	"context"
+	"errors"
+	"net/http"
 	"testing"
 
 	"github.com/dujiao-next/internal/constants"
@@ -20,7 +23,7 @@ func TestValidateConfig(t *testing.T) {
 	}
 }
 
-func TestValidateConfigWebhookIDRequired(t *testing.T) {
+func TestValidateConfigAllowsMissingWebhookID(t *testing.T) {
 	cfg := &Config{
 		ClientID:     "cid",
 		ClientSecret: "secret",
@@ -28,8 +31,23 @@ func TestValidateConfigWebhookIDRequired(t *testing.T) {
 		ReturnURL:    "https://example.com/payment?order_id=1",
 		CancelURL:    "https://example.com/payment?order_id=1",
 	}
-	if err := ValidateConfig(cfg); err == nil {
-		t.Fatalf("ValidateConfig should fail when webhook_id is empty")
+	if err := ValidateConfig(cfg); err != nil {
+		t.Fatalf("ValidateConfig should allow missing webhook_id, got: %v", err)
+	}
+}
+
+func TestVerifyWebhookSignatureRequiresWebhookID(t *testing.T) {
+	cfg := &Config{
+		ClientID:     "cid",
+		ClientSecret: "secret",
+		BaseURL:      "https://api-m.sandbox.paypal.com",
+		ReturnURL:    "https://example.com/payment?order_id=1",
+		CancelURL:    "https://example.com/payment?order_id=1",
+	}
+
+	err := VerifyWebhookSignature(context.Background(), cfg, http.Header{}, map[string]interface{}{})
+	if !errors.Is(err, ErrConfigInvalid) {
+		t.Fatalf("VerifyWebhookSignature should require webhook_id, got: %v", err)
 	}
 }
 
