@@ -24,6 +24,7 @@ type OrderItem struct {
 	CouponDiscount               Money          `gorm:"type:decimal(20,2);not null;default:0" json:"coupon_discount_amount"`    // 优惠券分摊金额
 	MemberDiscount               Money          `gorm:"type:decimal(20,2);not null;default:0" json:"member_discount_amount"`    // 会员优惠分摊金额
 	PromotionDiscount            Money          `gorm:"type:decimal(20,2);not null;default:0" json:"promotion_discount_amount"` // 活动价分摊金额
+	WholesaleDiscount            Money          `gorm:"type:decimal(20,2);not null;default:0" json:"wholesale_discount_amount"` // 批发价分摊金额
 	PromotionID                  *uint          `gorm:"index" json:"promotion_id,omitempty"`                                    // 活动价ID
 	PromotionName                string         `gorm:"-" json:"promotion_name,omitempty"`                                      // 活动价名称
 	FulfillmentType              string         `gorm:"not null" json:"fulfillment_type"`                                       // 交付类型

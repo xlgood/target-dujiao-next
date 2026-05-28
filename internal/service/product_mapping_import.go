@@ -146,6 +146,7 @@ func (s *ProductMappingService) importUpstreamProduct(connectionID uint, upstrea
 		ManualFormSchemaJSON: upProduct.ManualFormSchema,
 		PriceAmount:          models.NewMoneyFromDecimal(priceAmount.Round(2)),
 		CostPriceAmount:      models.NewMoneyFromDecimal(costPriceAmount.Round(2)),
+		WholesalePrices:      convertUpstreamWholesalePrices(upProduct.WholesalePrices, exchangeRate, markupPercent, roundingMode),
 		Images:               models.StringArray(localImages),
 		Tags:                 models.StringArray(upProduct.Tags),
 		PurchaseType:         constants.ProductPurchaseMember,
@@ -302,6 +303,28 @@ func createSKUMappingsWithRepo(
 	}
 
 	return nil
+}
+
+func convertUpstreamWholesalePrices(tiers models.WholesalePriceTiers, exchangeRate, markupPercent decimal.Decimal, roundingMode string) models.WholesalePriceTiers {
+	if len(tiers) == 0 {
+		return models.WholesalePriceTiers{}
+	}
+	converted := make([]WholesalePriceInput, 0, len(tiers))
+	for _, tier := range tiers {
+		if tier.MinQuantity <= 0 || tier.UnitPrice.Decimal.LessThanOrEqual(decimal.Zero) {
+			continue
+		}
+		localPrice := CalculateLocalPrice(tier.UnitPrice.Decimal, exchangeRate, markupPercent, roundingMode)
+		converted = append(converted, WholesalePriceInput{
+			MinQuantity: tier.MinQuantity,
+			UnitPrice:   localPrice,
+		})
+	}
+	normalized, err := normalizeWholesalePriceInputs(converted)
+	if err != nil {
+		return models.WholesalePriceTiers{}
+	}
+	return normalized
 }
 
 // downloadImages 下载上游图片到本地

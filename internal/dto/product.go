@@ -6,25 +6,26 @@ import (
 
 // ProductResp 商品公共响应
 type ProductResp struct {
-	ID                   uint               `json:"id"`
-	CategoryID           uint               `json:"category_id"`
-	Slug                 string             `json:"slug"`
-	SeoMeta              models.JSON        `json:"seo_meta"`
-	Title                models.JSON        `json:"title"`
-	Description          models.JSON        `json:"description"`
-	Content              models.JSON        `json:"content"`
-	PriceAmount          models.Money       `json:"price_amount"`
-	Images               models.StringArray `json:"images"`
-	Tags                 models.StringArray `json:"tags"`
-	PurchaseType         string             `json:"purchase_type"`
-	MinPurchaseQuantity  int                `json:"min_purchase_quantity"`
-	MaxPurchaseQuantity  int                `json:"max_purchase_quantity"`
-	FulfillmentType      string             `json:"fulfillment_type"`
-	ManualFormSchema     models.JSON        `json:"manual_form_schema"`
-	ManualStockAvailable int                `json:"manual_stock_available"`
-	AutoStockAvailable   int64              `json:"auto_stock_available"`
-	StockStatus          string             `json:"stock_status"`
-	IsSoldOut            bool               `json:"is_sold_out"`
+	ID                   uint                       `json:"id"`
+	CategoryID           uint                       `json:"category_id"`
+	Slug                 string                     `json:"slug"`
+	SeoMeta              models.JSON                `json:"seo_meta"`
+	Title                models.JSON                `json:"title"`
+	Description          models.JSON                `json:"description"`
+	Content              models.JSON                `json:"content"`
+	PriceAmount          models.Money               `json:"price_amount"`
+	WholesalePrices      models.WholesalePriceTiers `json:"wholesale_prices,omitempty"`
+	Images               models.StringArray         `json:"images"`
+	Tags                 models.StringArray         `json:"tags"`
+	PurchaseType         string                     `json:"purchase_type"`
+	MinPurchaseQuantity  int                        `json:"min_purchase_quantity"`
+	MaxPurchaseQuantity  int                        `json:"max_purchase_quantity"`
+	FulfillmentType      string                     `json:"fulfillment_type"`
+	ManualFormSchema     models.JSON                `json:"manual_form_schema"`
+	ManualStockAvailable int                        `json:"manual_stock_available"`
+	AutoStockAvailable   int64                      `json:"auto_stock_available"`
+	StockStatus          string                     `json:"stock_status"`
+	IsSoldOut            bool                       `json:"is_sold_out"`
 
 	// 支付渠道限制
 	PaymentChannelIDs []uint `json:"payment_channel_ids,omitempty"`

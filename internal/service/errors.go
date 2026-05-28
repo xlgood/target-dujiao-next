@@ -70,6 +70,7 @@ var (
 	ErrProductMaxPurchaseExceeded          = errors.New("product max purchase exceeded")
 	ErrProductMinPurchaseNotMet            = errors.New("product min purchase not met")
 	ErrProductPurchaseLimitInvalid         = errors.New("product purchase limit invalid")
+	ErrWholesalePriceInvalid               = errors.New("wholesale price invalid")
 	ErrManualStockInvalid                  = errors.New("manual stock invalid")
 	ErrManualStockInsufficient             = errors.New("manual stock insufficient")
 	ErrUpstreamStockInsufficient           = errors.New("upstream stock insufficient")

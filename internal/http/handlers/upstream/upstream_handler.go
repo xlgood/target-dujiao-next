@@ -177,24 +177,25 @@ func (h *Handler) ListCategories(c *gin.Context) {
 
 // upstreamProduct 上游商品响应格式
 type upstreamProduct struct {
-	ID               uint               `json:"id"`
-	Slug             string             `json:"slug"`
-	SeoMeta          models.JSON        `json:"seo_meta"`
-	Title            models.JSON        `json:"title"`
-	Description      models.JSON        `json:"description"`
-	Content          models.JSON        `json:"content"`
-	Images           models.StringArray `json:"images"`
-	Tags             models.StringArray `json:"tags"`
-	PriceAmount      string             `json:"price_amount"`
-	OriginalPrice    string             `json:"original_price,omitempty"`
-	MemberPrice      string             `json:"member_price,omitempty"`
-	FulfillmentType  string             `json:"fulfillment_type"`
-	ManualFormSchema models.JSON        `json:"manual_form_schema"`
-	IsActive         bool               `json:"is_active"`
-	CategoryID       uint               `json:"category_id"`
-	SKUs             []upstreamSKU      `json:"skus"`
-	CreatedAt        time.Time          `json:"created_at"`
-	UpdatedAt        time.Time          `json:"updated_at"`
+	ID               uint                       `json:"id"`
+	Slug             string                     `json:"slug"`
+	SeoMeta          models.JSON                `json:"seo_meta"`
+	Title            models.JSON                `json:"title"`
+	Description      models.JSON                `json:"description"`
+	Content          models.JSON                `json:"content"`
+	Images           models.StringArray         `json:"images"`
+	Tags             models.StringArray         `json:"tags"`
+	PriceAmount      string                     `json:"price_amount"`
+	OriginalPrice    string                     `json:"original_price,omitempty"`
+	MemberPrice      string                     `json:"member_price,omitempty"`
+	WholesalePrices  models.WholesalePriceTiers `json:"wholesale_prices,omitempty"`
+	FulfillmentType  string                     `json:"fulfillment_type"`
+	ManualFormSchema models.JSON                `json:"manual_form_schema"`
+	IsActive         bool                       `json:"is_active"`
+	CategoryID       uint                       `json:"category_id"`
+	SKUs             []upstreamSKU              `json:"skus"`
+	CreatedAt        time.Time                  `json:"created_at"`
+	UpdatedAt        time.Time                  `json:"updated_at"`
 }
 
 type upstreamSKU struct {
@@ -893,6 +894,7 @@ func (h *Handler) toUpstreamProductWithMemberPrice(p models.Product, memberLevel
 		Images:           p.Images,
 		Tags:             p.Tags,
 		PriceAmount:      p.PriceAmount.StringFixed(2),
+		WholesalePrices:  p.WholesalePrices,
 		FulfillmentType:  effectiveFulfillmentType,
 		ManualFormSchema: p.ManualFormSchemaJSON,
 		IsActive:         p.IsActive,

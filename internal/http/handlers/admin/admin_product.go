@@ -91,30 +91,50 @@ type ProductSKURequest struct {
 	SortOrder        int                    `json:"sort_order"`
 }
 
+type WholesalePriceRequest struct {
+	MinQuantity int     `json:"min_quantity"`
+	UnitPrice   float64 `json:"unit_price"`
+}
+
 // CreateProductRequest 创建商品请求
 type CreateProductRequest struct {
-	CategoryID          uint                   `json:"category_id" binding:"required"`
-	Slug                string                 `json:"slug" binding:"required"`
-	SeoMetaJSON         map[string]interface{} `json:"seo_meta"`
-	TitleJSON           map[string]interface{} `json:"title" binding:"required"`
-	DescriptionJSON     map[string]interface{} `json:"description"`
-	ContentJSON         map[string]interface{} `json:"content"`
-	InstructionsJSON    map[string]interface{} `json:"instructions"`
-	ManualFormSchema    map[string]interface{} `json:"manual_form_schema"`
-	PriceAmount         float64                `json:"price_amount" binding:"required"`
-	CostPriceAmount     float64                `json:"cost_price_amount"`
-	Images              []string               `json:"images"`
-	Tags                []string               `json:"tags"`
-	PurchaseType        string                 `json:"purchase_type"`
-	MinPurchaseQuantity *int                   `json:"min_purchase_quantity"`
-	MaxPurchaseQuantity *int                   `json:"max_purchase_quantity"`
-	FulfillmentType     string                 `json:"fulfillment_type"`
-	ManualStockTotal    *int                   `json:"manual_stock_total"`
-	SKUs                []ProductSKURequest    `json:"skus"`
-	PaymentChannelIDs   []uint                 `json:"payment_channel_ids"`
-	IsAffiliateEnabled  *bool                  `json:"is_affiliate_enabled"`
-	IsActive            *bool                  `json:"is_active"`
-	SortOrder           int                    `json:"sort_order"`
+	CategoryID          uint                    `json:"category_id" binding:"required"`
+	Slug                string                  `json:"slug" binding:"required"`
+	SeoMetaJSON         map[string]interface{}  `json:"seo_meta"`
+	TitleJSON           map[string]interface{}  `json:"title" binding:"required"`
+	DescriptionJSON     map[string]interface{}  `json:"description"`
+	ContentJSON         map[string]interface{}  `json:"content"`
+	InstructionsJSON    map[string]interface{}  `json:"instructions"`
+	ManualFormSchema    map[string]interface{}  `json:"manual_form_schema"`
+	PriceAmount         float64                 `json:"price_amount" binding:"required"`
+	CostPriceAmount     float64                 `json:"cost_price_amount"`
+	WholesalePrices     []WholesalePriceRequest `json:"wholesale_prices"`
+	Images              []string                `json:"images"`
+	Tags                []string                `json:"tags"`
+	PurchaseType        string                  `json:"purchase_type"`
+	MinPurchaseQuantity *int                    `json:"min_purchase_quantity"`
+	MaxPurchaseQuantity *int                    `json:"max_purchase_quantity"`
+	FulfillmentType     string                  `json:"fulfillment_type"`
+	ManualStockTotal    *int                    `json:"manual_stock_total"`
+	SKUs                []ProductSKURequest     `json:"skus"`
+	PaymentChannelIDs   []uint                  `json:"payment_channel_ids"`
+	IsAffiliateEnabled  *bool                   `json:"is_affiliate_enabled"`
+	IsActive            *bool                   `json:"is_active"`
+	SortOrder           int                     `json:"sort_order"`
+}
+
+func toWholesalePriceInputs(items []WholesalePriceRequest) []service.WholesalePriceInput {
+	if len(items) == 0 {
+		return nil
+	}
+	result := make([]service.WholesalePriceInput, 0, len(items))
+	for _, item := range items {
+		result = append(result, service.WholesalePriceInput{
+			MinQuantity: item.MinQuantity,
+			UnitPrice:   decimal.NewFromFloat(item.UnitPrice),
+		})
+	}
+	return result
 }
 
 func toProductSKUInputs(items []ProductSKURequest) []service.ProductSKUInput {
@@ -156,6 +176,7 @@ func (h *Handler) CreateProduct(c *gin.Context) {
 		ManualFormSchemaJSON: req.ManualFormSchema,
 		PriceAmount:          decimal.NewFromFloat(req.PriceAmount),
 		CostPriceAmount:      decimal.NewFromFloat(req.CostPriceAmount),
+		WholesalePrices:      toWholesalePriceInputs(req.WholesalePrices),
 		Images:               req.Images,
 		Tags:                 req.Tags,
 		PurchaseType:         req.PurchaseType,
@@ -202,6 +223,10 @@ func (h *Handler) CreateProduct(c *gin.Context) {
 			shared.RespondError(c, response.CodeBadRequest, "error.product_purchase_limit_invalid", nil)
 			return
 		}
+		if errors.Is(err, service.ErrWholesalePriceInvalid) {
+			shared.RespondError(c, response.CodeBadRequest, "error.wholesale_price_invalid", nil)
+			return
+		}
 		if errors.Is(err, service.ErrProductSKUInvalid) {
 			shared.RespondError(c, response.CodeBadRequest, "error.bad_request", nil)
 			return
@@ -238,6 +263,7 @@ func (h *Handler) UpdateProduct(c *gin.Context) {
 		ManualFormSchemaJSON: req.ManualFormSchema,
 		PriceAmount:          decimal.NewFromFloat(req.PriceAmount),
 		CostPriceAmount:      decimal.NewFromFloat(req.CostPriceAmount),
+		WholesalePrices:      toWholesalePriceInputs(req.WholesalePrices),
 		Images:               req.Images,
 		Tags:                 req.Tags,
 		PurchaseType:         req.PurchaseType,
@@ -286,6 +312,10 @@ func (h *Handler) UpdateProduct(c *gin.Context) {
 		}
 		if errors.Is(err, service.ErrProductPurchaseLimitInvalid) {
 			shared.RespondError(c, response.CodeBadRequest, "error.product_purchase_limit_invalid", nil)
+			return
+		}
+		if errors.Is(err, service.ErrWholesalePriceInvalid) {
+			shared.RespondError(c, response.CodeBadRequest, "error.wholesale_price_invalid", nil)
 			return
 		}
 		if errors.Is(err, service.ErrProductSKUInvalid) {

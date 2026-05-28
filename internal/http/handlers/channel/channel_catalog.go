@@ -12,6 +12,7 @@ import (
 	"github.com/dujiao-next/internal/service"
 
 	"github.com/gin-gonic/gin"
+	"github.com/shopspring/decimal"
 )
 
 // GetCategories GET /api/v1/channel/catalog/categories?locale=zh-CN
@@ -89,6 +90,28 @@ func (h *Handler) GetCategories(c *gin.Context) {
 	respondChannelSuccess(c, gin.H{"items": items})
 }
 
+type channelWholesalePrice struct {
+	MinQuantity int    `json:"min_quantity"`
+	UnitPrice   string `json:"unit_price"`
+}
+
+func normalizeChannelWholesalePrices(tiers models.WholesalePriceTiers) []channelWholesalePrice {
+	if len(tiers) == 0 {
+		return nil
+	}
+	items := make([]channelWholesalePrice, 0, len(tiers))
+	for _, tier := range tiers {
+		if tier.MinQuantity <= 0 || tier.UnitPrice.Decimal.LessThanOrEqual(decimal.Zero) {
+			continue
+		}
+		items = append(items, channelWholesalePrice{
+			MinQuantity: tier.MinQuantity,
+			UnitPrice:   tier.UnitPrice.String(),
+		})
+	}
+	return items
+}
+
 // GetProducts GET /api/v1/channel/catalog/products?locale=zh-CN&category_id=1&page=1&page_size=5
 func (h *Handler) GetProducts(c *gin.Context) {
 	locale := c.DefaultQuery("locale", "zh-CN")
@@ -144,16 +167,17 @@ func (h *Handler) GetProducts(c *gin.Context) {
 	}
 
 	type productItem struct {
-		ID              uint   `json:"id"`
-		Title           string `json:"title"`
-		Summary         string `json:"summary"`
-		ImageURL        string `json:"image_url"`
-		PriceFrom       string `json:"price_from"`
-		MemberPriceFrom string `json:"member_price_from,omitempty"`
-		Currency        string `json:"currency"`
-		StockStatus     string `json:"stock_status"`
-		StockCount      int64  `json:"stock_count"`
-		CategoryName    string `json:"category_name"`
+		ID              uint                    `json:"id"`
+		Title           string                  `json:"title"`
+		Summary         string                  `json:"summary"`
+		ImageURL        string                  `json:"image_url"`
+		PriceFrom       string                  `json:"price_from"`
+		MemberPriceFrom string                  `json:"member_price_from,omitempty"`
+		WholesalePrices []channelWholesalePrice `json:"wholesale_prices,omitempty"`
+		Currency        string                  `json:"currency"`
+		StockStatus     string                  `json:"stock_status"`
+		StockCount      int64                   `json:"stock_count"`
+		CategoryName    string                  `json:"category_name"`
 	}
 
 	items := make([]productItem, 0, len(products))
@@ -174,15 +198,16 @@ func (h *Handler) GetProducts(c *gin.Context) {
 		}
 
 		item := productItem{
-			ID:           p.ID,
-			Title:        title,
-			Summary:      summary,
-			ImageURL:     imageURL,
-			PriceFrom:    p.PriceAmount.String(),
-			Currency:     currency,
-			StockStatus:  computeStockStatus(ft, p.AutoStockAvailable, p.ManualStockTotal),
-			StockCount:   computeStockCount(ft, p.AutoStockAvailable, p.ManualStockTotal),
-			CategoryName: resolveLocalizedJSON(p.Category.NameJSON, locale, defaultLocale),
+			ID:              p.ID,
+			Title:           title,
+			Summary:         summary,
+			ImageURL:        imageURL,
+			PriceFrom:       p.PriceAmount.String(),
+			WholesalePrices: normalizeChannelWholesalePrices(p.WholesalePrices),
+			Currency:        currency,
+			StockStatus:     computeStockStatus(ft, p.AutoStockAvailable, p.ManualStockTotal),
+			StockCount:      computeStockCount(ft, p.AutoStockAvailable, p.ManualStockTotal),
+			CategoryName:    resolveLocalizedJSON(p.Category.NameJSON, locale, defaultLocale),
 		}
 
 		// 计算会员价
@@ -311,6 +336,7 @@ func (h *Handler) GetProductDetail(c *gin.Context) {
 		"image_url":             imageURL,
 		"price_from":            product.PriceAmount.String(),
 		"member_price_from":     memberPriceFrom,
+		"wholesale_prices":      normalizeChannelWholesalePrices(product.WholesalePrices),
 		"currency":              currency,
 		"stock_status":          computeStockStatus(effectiveFT, product.AutoStockAvailable, product.ManualStockTotal),
 		"stock_count":           computeStockCount(effectiveFT, product.AutoStockAvailable, product.ManualStockTotal),

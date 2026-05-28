@@ -74,8 +74,9 @@ func (s *ProductMappingService) SyncProduct(mappingID uint) error {
 		// 同步人工交付表单配置
 		if upProduct.ManualFormSchema != nil {
 			localProduct.ManualFormSchemaJSON = upProduct.ManualFormSchema
-			_ = s.productRepo.Update(localProduct)
 		}
+		localProduct.WholesalePrices = convertUpstreamWholesalePrices(upProduct.WholesalePrices, conn.ExchangeRate, conn.PriceMarkupPercent, conn.PriceRoundingMode)
+		_ = s.productRepo.Update(localProduct)
 	}
 
 	// ── 2. 同步 SKU：新增 / 更新 / 停用 ──

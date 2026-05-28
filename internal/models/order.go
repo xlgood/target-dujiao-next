@@ -21,6 +21,7 @@ type Order struct {
 	DiscountAmount          Money          `gorm:"type:decimal(20,2);not null;default:0" json:"discount_amount"`           // 优惠金额
 	MemberDiscountAmount    Money          `gorm:"type:decimal(20,2);not null;default:0" json:"member_discount_amount"`    // 会员优惠金额
 	PromotionDiscountAmount Money          `gorm:"type:decimal(20,2);not null;default:0" json:"promotion_discount_amount"` // 活动价优惠金额
+	WholesaleDiscountAmount Money          `gorm:"type:decimal(20,2);not null;default:0" json:"wholesale_discount_amount"` // 批发价优惠金额
 	TotalAmount             Money          `gorm:"type:decimal(20,2);not null;default:0" json:"total_amount"`              // 实付金额
 	WalletPaidAmount        Money          `gorm:"type:decimal(20,2);not null;default:0" json:"wallet_paid_amount"`        // 钱包支付金额
 	OnlinePaidAmount        Money          `gorm:"type:decimal(20,2);not null;default:0" json:"online_paid_amount"`        // 在线支付金额

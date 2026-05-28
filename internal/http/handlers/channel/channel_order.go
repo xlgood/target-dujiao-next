@@ -197,6 +197,7 @@ func (h *Handler) CreateOrder(c *gin.Context) {
 		"original_amount":    order.OriginalAmount.StringFixed(2),
 		"coupon_discount":    order.DiscountAmount.StringFixed(2),
 		"promotion_discount": order.PromotionDiscountAmount.StringFixed(2),
+		"wholesale_discount": order.WholesaleDiscountAmount.StringFixed(2),
 		"total_amount":       order.TotalAmount.StringFixed(2),
 		"wallet_paid_amount": order.WalletPaidAmount.StringFixed(2),
 		"online_paid_amount": order.OnlinePaidAmount.StringFixed(2),
@@ -722,6 +723,7 @@ func buildChannelOrderPreviewResponse(preview *service.OrderPreview, locale stri
 			"subtotal":             item.TotalPrice.StringFixed(2),
 			"coupon_discount":      item.CouponDiscount.StringFixed(2),
 			"promotion_discount":   item.PromotionDiscount.StringFixed(2),
+			"wholesale_discount":   item.WholesaleDiscount.StringFixed(2),
 			"fulfillment_type":     item.FulfillmentType,
 		})
 	}
@@ -731,6 +733,7 @@ func buildChannelOrderPreviewResponse(preview *service.OrderPreview, locale stri
 		"items":              items,
 		"coupon_discount":    preview.DiscountAmount.StringFixed(2),
 		"promotion_discount": preview.PromotionDiscountAmount.StringFixed(2),
+		"wholesale_discount": preview.WholesaleDiscountAmount.StringFixed(2),
 		"total_amount":       preview.TotalAmount.StringFixed(2),
 		"currency":           preview.Currency,
 		"valid":              true,
@@ -770,6 +773,7 @@ func buildChannelOrderDetailResponse(order *models.Order, locale string) gin.H {
 		"original_amount":    order.OriginalAmount.StringFixed(2),
 		"coupon_discount":    order.DiscountAmount.StringFixed(2),
 		"promotion_discount": order.PromotionDiscountAmount.StringFixed(2),
+		"wholesale_discount": order.WholesaleDiscountAmount.StringFixed(2),
 		"total_amount":       order.TotalAmount.StringFixed(2),
 		"wallet_paid_amount": order.WalletPaidAmount.StringFixed(2),
 		"online_paid_amount": order.OnlinePaidAmount.StringFixed(2),
@@ -801,6 +805,7 @@ func buildChannelOrderDetailResponse(order *models.Order, locale string) gin.H {
 			"subtotal":             item.TotalPrice.StringFixed(2),
 			"coupon_discount":      item.CouponDiscount.StringFixed(2),
 			"promotion_discount":   item.PromotionDiscount.StringFixed(2),
+			"wholesale_discount":   item.WholesaleDiscount.StringFixed(2),
 			"fulfillment_type":     item.FulfillmentType,
 			"instructions":         instructions,
 		})
