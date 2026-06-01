@@ -44,6 +44,13 @@ func (s *OrderService) buildOrderResult(input orderCreateParams) (*orderBuildRes
 	var promotionSeen bool
 	promotionSame := true
 	var noPromotionSeen bool
+	productQuantityTotals := make(map[uint]int, len(mergedItems))
+	for _, item := range mergedItems {
+		if item.ProductID == 0 || item.Quantity <= 0 {
+			continue
+		}
+		productQuantityTotals[item.ProductID] += item.Quantity
+	}
 
 	// 解析用户会员等级
 	var userMemberLevelID uint
@@ -109,7 +116,11 @@ func (s *OrderService) buildOrderResult(input orderCreateParams) (*orderBuildRes
 				Round(2)
 		}
 
-		wholesaleUnitPrice, wholesaleDiscount, wholesaleMatched := ResolveWholesaleUnitPrice(product, basePrice, item.Quantity)
+		wholesaleMatchQuantity := productQuantityTotals[item.ProductID]
+		if wholesaleMatchQuantity <= 0 {
+			wholesaleMatchQuantity = item.Quantity
+		}
+		wholesaleUnitPrice, wholesaleDiscount, wholesaleMatched := ResolveWholesaleUnitPriceWithMatchQuantity(product, basePrice, wholesaleMatchQuantity, item.Quantity)
 		if wholesaleMatched && wholesaleUnitPrice.LessThan(unitPriceAmount) {
 			unitPriceAmount = wholesaleUnitPrice
 			promotion = nil

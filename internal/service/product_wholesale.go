@@ -40,8 +40,18 @@ func normalizeWholesalePriceInputs(inputs []WholesalePriceInput) (models.Wholesa
 // ResolveWholesaleUnitPrice 根据商品批发价阶梯解析成交单价。
 // 仅在阶梯单价低于当前基准单价时生效，避免错误配置导致价格上浮。
 func ResolveWholesaleUnitPrice(product *models.Product, baseUnitPrice decimal.Decimal, quantity int) (unitPrice decimal.Decimal, discount decimal.Decimal, matched bool) {
+	return resolveWholesaleUnitPrice(product, baseUnitPrice, quantity, quantity)
+}
+
+// ResolveWholesaleUnitPriceWithMatchQuantity 按 matchQuantity 判断批发档位，按 quantity 计算当前行优惠。
+// 商品存在多 SKU 时，批发门槛按同一商品总购买数判断，但每个订单行只计算自己的优惠金额。
+func ResolveWholesaleUnitPriceWithMatchQuantity(product *models.Product, baseUnitPrice decimal.Decimal, matchQuantity, quantity int) (unitPrice decimal.Decimal, discount decimal.Decimal, matched bool) {
+	return resolveWholesaleUnitPrice(product, baseUnitPrice, matchQuantity, quantity)
+}
+
+func resolveWholesaleUnitPrice(product *models.Product, baseUnitPrice decimal.Decimal, matchQuantity, quantity int) (unitPrice decimal.Decimal, discount decimal.Decimal, matched bool) {
 	base := baseUnitPrice.Round(2)
-	if product == nil || quantity <= 0 || base.LessThanOrEqual(decimal.Zero) || len(product.WholesalePrices) == 0 {
+	if product == nil || matchQuantity <= 0 || quantity <= 0 || base.LessThanOrEqual(decimal.Zero) || len(product.WholesalePrices) == 0 {
 		return base, decimal.Zero, false
 	}
 
@@ -51,7 +61,7 @@ func ResolveWholesaleUnitPrice(product *models.Product, baseUnitPrice decimal.De
 		if tier.MinQuantity <= 0 || tier.UnitPrice.Decimal.LessThanOrEqual(decimal.Zero) {
 			continue
 		}
-		if quantity < tier.MinQuantity {
+		if matchQuantity < tier.MinQuantity {
 			continue
 		}
 		if best == nil || tier.MinQuantity > best.MinQuantity {

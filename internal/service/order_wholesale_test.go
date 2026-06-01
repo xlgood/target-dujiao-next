@@ -15,6 +15,7 @@ import (
 )
 
 type wholesaleOrderFixture struct {
+	db      *gorm.DB
 	svc     *OrderService
 	product models.Product
 	sku     models.ProductSKU
@@ -134,7 +135,7 @@ func setupWholesaleOrderFixture(t *testing.T, name string, wholesalePrices model
 		ExpireMinutes:      15,
 	})
 
-	return wholesaleOrderFixture{svc: svc, product: product, sku: sku, user: user}
+	return wholesaleOrderFixture{db: db, svc: svc, product: product, sku: sku, user: user}
 }
 
 func TestBuildOrderResultPrefersWholesaleOverPromotion(t *testing.T) {
@@ -225,5 +226,52 @@ func TestBuildOrderResultAppliesMemberDiscountAfterWholesale(t *testing.T) {
 	item := result.Plans[0].Item
 	if item.UnitPrice.String() != "64.00" || item.WholesaleDiscount.String() != "100.00" || item.MemberDiscount.String() != "80.00" {
 		t.Fatalf("unexpected item price result: unit=%s wholesale=%s member=%s", item.UnitPrice.String(), item.WholesaleDiscount.String(), item.MemberDiscount.String())
+	}
+}
+
+func TestBuildOrderResultMatchesWholesaleByProductQuantityAcrossSKUs(t *testing.T) {
+	wholesalePrices := models.WholesalePriceTiers{
+		{MinQuantity: 10, UnitPrice: models.NewMoneyFromDecimal(decimal.NewFromInt(80))},
+	}
+	fixture := setupWholesaleOrderFixture(t, "wholesale_across_skus", wholesalePrices, nil, nil)
+
+	skuB := models.ProductSKU{
+		ProductID:   fixture.product.ID,
+		SKUCode:     "SKU-B",
+		PriceAmount: models.NewMoneyFromDecimal(decimal.NewFromInt(100)),
+		IsActive:    true,
+		CreatedAt:   time.Now(),
+		UpdatedAt:   time.Now(),
+	}
+	if err := fixture.db.Create(&skuB).Error; err != nil {
+		t.Fatalf("create second sku failed: %v", err)
+	}
+
+	result, err := fixture.svc.buildOrderResult(orderCreateParams{
+		Items: []CreateOrderItem{
+			{ProductID: fixture.product.ID, SKUID: fixture.sku.ID, Quantity: 6},
+			{ProductID: fixture.product.ID, SKUID: skuB.ID, Quantity: 6},
+		},
+	})
+	if err != nil {
+		t.Fatalf("buildOrderResult failed: %v", err)
+	}
+
+	if !result.OriginalAmount.Equal(decimal.NewFromInt(1200)) {
+		t.Fatalf("expected original amount 1200, got %s", result.OriginalAmount.String())
+	}
+	if !result.WholesaleDiscountAmount.Equal(decimal.NewFromInt(240)) {
+		t.Fatalf("expected wholesale discount 240, got %s", result.WholesaleDiscountAmount.String())
+	}
+	if !result.TotalAmount.Equal(decimal.NewFromInt(960)) {
+		t.Fatalf("expected total 960, got %s", result.TotalAmount.String())
+	}
+	if len(result.Plans) != 2 {
+		t.Fatalf("expected 2 plans, got %d", len(result.Plans))
+	}
+	for _, plan := range result.Plans {
+		if plan.Item.UnitPrice.String() != "80.00" || plan.Item.WholesaleDiscount.String() != "120.00" {
+			t.Fatalf("unexpected item price result: sku=%d unit=%s wholesale=%s", plan.Item.SKUID, plan.Item.UnitPrice.String(), plan.Item.WholesaleDiscount.String())
+		}
 	}
 }
