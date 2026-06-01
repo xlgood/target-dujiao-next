@@ -1,6 +1,6 @@
 module github.com/dujiao-next
 
-go 1.25.3
+go 1.26.3
 
 require (
 	github.com/casbin/casbin/v3 v3.10.0
