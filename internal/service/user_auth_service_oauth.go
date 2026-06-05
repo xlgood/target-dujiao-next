@@ -667,6 +667,10 @@ func (s *UserAuthService) findOrCreateTelegramUser(verified *TelegramIdentityVer
 	// 分配默认会员等级
 	if s.memberLevelSvc != nil {
 		_ = s.memberLevelSvc.AssignDefaultLevel(user.ID)
+		// 同步内存对象的等级，避免调用方后续 Update(Save) 用零值覆盖数据库
+		if refreshed, err := s.userRepo.GetByID(user.ID); err == nil && refreshed != nil {
+			user.MemberLevelID = refreshed.MemberLevelID
+		}
 	}
 	return user, nil
 }

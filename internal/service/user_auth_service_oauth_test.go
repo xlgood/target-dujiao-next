@@ -243,3 +243,56 @@ func TestTelegramMiniAppLoginReturnsRegistrationDisabledWhenCreatingNewUser(t *t
 		t.Fatalf("expected ErrRegistrationDisabled, got res=%+v err=%v", res, err)
 	}
 }
+
+// TestLoginWithTelegramAssignsDefaultMemberLevel 回归测试：Telegram 一键登录创建的新用户
+// 必须被分配默认会员等级，且不会被后续 Update(Save) 用零值覆盖（issue #197）。
+func TestLoginWithTelegramAssignsDefaultMemberLevel(t *testing.T) {
+	svc, db := setupTelegramOAuthTestService(t)
+	if err := db.AutoMigrate(&models.MemberLevel{}); err != nil {
+		t.Fatalf("auto migrate member level failed: %v", err)
+	}
+
+	now := time.Now()
+	defaultLevel := &models.MemberLevel{
+		NameJSON:  models.JSON{"zh-CN": "默认等级"},
+		Slug:      "default",
+		IsDefault: true,
+		IsActive:  true,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	if err := db.Create(defaultLevel).Error; err != nil {
+		t.Fatalf("create default level failed: %v", err)
+	}
+
+	svc.SetMemberLevelService(NewMemberLevelService(
+		repository.NewMemberLevelRepository(db),
+		nil,
+		repository.NewUserRepository(db),
+	))
+
+	res, err := svc.loginWithVerifiedTelegram(&TelegramIdentityVerified{
+		Provider:       constants.UserOAuthProviderTelegram,
+		ProviderUserID: "20001",
+		Username:       "tg_level_user",
+		AuthAt:         time.Now(),
+	})
+	if err != nil {
+		t.Fatalf("loginWithVerifiedTelegram returned error: %v", err)
+	}
+	if res.User == nil {
+		t.Fatalf("expected user, got nil")
+	}
+	if res.User.MemberLevelID != defaultLevel.ID {
+		t.Fatalf("in-memory user member level = %d, want %d", res.User.MemberLevelID, defaultLevel.ID)
+	}
+
+	// 关键断言：数据库中的等级未被登录流程末尾的 Update 覆盖
+	var persisted models.User
+	if err := db.First(&persisted, res.User.ID).Error; err != nil {
+		t.Fatalf("load persisted user failed: %v", err)
+	}
+	if persisted.MemberLevelID != defaultLevel.ID {
+		t.Fatalf("persisted user member level = %d, want %d (被零值覆盖)", persisted.MemberLevelID, defaultLevel.ID)
+	}
+}
