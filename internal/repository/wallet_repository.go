@@ -28,6 +28,7 @@ type WalletRepository interface {
 	GetRechargeOrderByPaymentIDAndUser(paymentID uint, userID uint) (*models.WalletRechargeOrder, error)
 	GetRechargeOrderByPaymentIDForUpdate(paymentID uint) (*models.WalletRechargeOrder, error)
 	ListRechargeOrdersAdmin(filter WalletRechargeListFilter) ([]models.WalletRechargeOrder, int64, error)
+	StatsRechargeOrders(filter WalletRechargeListFilter) (map[string]int64, error)
 	GetRechargeOrdersByPaymentIDs(paymentIDs []uint) ([]models.WalletRechargeOrder, error)
 	Transaction(fn func(tx *gorm.DB) error) error
 	WithTx(tx *gorm.DB) *GormWalletRepository
@@ -315,6 +316,35 @@ func (r *GormWalletRepository) ListRechargeOrdersAdmin(filter WalletRechargeList
 		return nil, 0, err
 	}
 	return orders, total, nil
+}
+
+// StatsRechargeOrders 按状态聚合充值单数量（忽略分页与状态筛选，复用其他筛选条件）
+func (r *GormWalletRepository) StatsRechargeOrders(filter WalletRechargeListFilter) (map[string]int64, error) {
+	query := r.db.Model(&models.WalletRechargeOrder{})
+
+	if filter.RechargeNo != "" {
+		query = query.Where("wallet_recharge_orders.recharge_no LIKE ?", "%"+filter.RechargeNo+"%")
+	}
+	if filter.UserID != 0 {
+		query = query.Where("wallet_recharge_orders.user_id = ?", filter.UserID)
+	}
+	// 注意：不应用 filter.Status，聚合目的就是看各状态分布
+
+	type row struct {
+		Status string
+		Count  int64
+	}
+	var rows []row
+	if err := query.Select("wallet_recharge_orders.status as status, COUNT(*) as count").
+		Group("wallet_recharge_orders.status").Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+
+	result := make(map[string]int64, len(rows))
+	for _, item := range rows {
+		result[item.Status] = item.Count
+	}
+	return result, nil
 }
 
 // GetRechargeOrdersByPaymentIDs 按支付ID批量查询充值支付单

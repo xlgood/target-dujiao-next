@@ -112,6 +112,17 @@ func (s *WalletService) ListUserRechargeOrders(userID uint, page, pageSize int, 
 	})
 }
 
+// StatsUserRechargeOrders 按状态聚合当前用户充值单数量（基于全量数据，仅复用关键词筛选）
+func (s *WalletService) StatsUserRechargeOrders(userID uint, rechargeNo string) (map[string]int64, error) {
+	if userID == 0 {
+		return nil, ErrWalletAccountNotFound
+	}
+	return s.walletRepo.StatsRechargeOrders(repository.WalletRechargeListFilter{
+		UserID:     userID,
+		RechargeNo: rechargeNo,
+	})
+}
+
 // GetRechargeOrderByRechargeNo 按充值单号查询当前用户充值单
 func (s *WalletService) GetRechargeOrderByRechargeNo(userID uint, rechargeNo string) (*models.WalletRechargeOrder, error) {
 	if userID == 0 {

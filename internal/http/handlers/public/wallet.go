@@ -205,6 +205,30 @@ func (h *Handler) ListMyWalletRecharges(c *gin.Context) {
 	response.SuccessWithPage(c, dto.NewWalletRechargeRespList(orders), pagination)
 }
 
+// MyWalletRechargeStats 按状态聚合当前用户充值单数量（基于全量数据，仅复用关键词筛选）
+func (h *Handler) MyWalletRechargeStats(c *gin.Context) {
+	uid, ok := shared.GetUserID(c)
+	if !ok {
+		return
+	}
+	rechargeNo := strings.TrimSpace(c.Query("recharge_no"))
+
+	stats, err := h.WalletService.StatsUserRechargeOrders(uid, rechargeNo)
+	if err != nil {
+		shared.RespondError(c, response.CodeInternal, "error.user_fetch_failed", err)
+		return
+	}
+
+	var total int64
+	for _, v := range stats {
+		total += v
+	}
+	response.Success(c, gin.H{
+		"total":     total,
+		"by_status": stats,
+	})
+}
+
 // CaptureMyWalletRechargePayment 主动检查当前用户充值支付状态
 func (h *Handler) CaptureMyWalletRechargePayment(c *gin.Context) {
 	uid, ok := shared.GetUserID(c)

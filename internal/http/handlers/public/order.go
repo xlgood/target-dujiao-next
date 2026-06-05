@@ -418,6 +418,34 @@ func (h *Handler) ListOrders(c *gin.Context) {
 	response.SuccessWithPage(c, dto.NewOrderSummaryList(orders), pagination)
 }
 
+// OrderStats 按状态聚合当前用户订单数量（基于全量数据，仅复用关键词筛选）
+func (h *Handler) OrderStats(c *gin.Context) {
+	uid, ok := shared.GetUserID(c)
+	if !ok {
+		return
+	}
+
+	orderNo := strings.TrimSpace(c.Query("order_no"))
+
+	stats, err := h.OrderService.StatsOrdersByUser(repository.OrderListFilter{
+		UserID:  uid,
+		OrderNo: orderNo,
+	})
+	if err != nil {
+		shared.RespondError(c, response.CodeInternal, "error.order_fetch_failed", err)
+		return
+	}
+
+	var total int64
+	for _, v := range stats {
+		total += v
+	}
+	response.Success(c, gin.H{
+		"total":     total,
+		"by_status": stats,
+	})
+}
+
 // GetOrderByOrderNo 按订单号获取订单详情
 func (h *Handler) GetOrderByOrderNo(c *gin.Context) {
 	uid, ok := shared.GetUserID(c)

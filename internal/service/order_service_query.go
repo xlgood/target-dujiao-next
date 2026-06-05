@@ -324,6 +324,18 @@ func (s *OrderService) ListOrdersByUser(filter repository.OrderListFilter) ([]mo
 	return orders, total, nil
 }
 
+// StatsOrdersByUser 按状态聚合用户订单数量（基于全量数据，仅复用关键词筛选）
+func (s *OrderService) StatsOrdersByUser(filter repository.OrderListFilter) (map[string]int64, error) {
+	if filter.UserID == 0 {
+		return nil, ErrOrderFetchFailed
+	}
+	stats, err := s.orderRepo.StatsByUser(filter)
+	if err != nil {
+		return nil, ErrOrderFetchFailed
+	}
+	return stats, nil
+}
+
 // ListOrdersByGuest 获取游客订单列表
 func (s *OrderService) ListOrdersByGuest(email, password string, page, pageSize int) ([]models.Order, int64, error) {
 	email = strings.ToLower(strings.TrimSpace(email))

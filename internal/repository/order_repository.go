@@ -26,6 +26,7 @@ type OrderRepository interface {
 	GetAnyByOrderNoAndGuest(orderNo, email, password string) (*models.Order, error)
 	ListChildren(parentID uint) ([]models.Order, error)
 	ListByUser(filter OrderListFilter) ([]models.Order, int64, error)
+	StatsByUser(filter OrderListFilter) (map[string]int64, error)
 	ListByGuest(email, password string, page, pageSize int) ([]models.Order, int64, error)
 	ListAdmin(filter OrderListFilter) ([]models.Order, int64, error)
 	UpdateStatus(id uint, status string, updates map[string]interface{}) error
@@ -367,6 +368,30 @@ func (r *GormOrderRepository) ListByUser(filter OrderListFilter) ([]models.Order
 		return nil, 0, err
 	}
 	return orders, total, nil
+}
+
+// StatsByUser 按状态聚合用户订单数量（忽略分页与状态筛选，复用关键词筛选）
+func (r *GormOrderRepository) StatsByUser(filter OrderListFilter) (map[string]int64, error) {
+	query := r.db.Model(&models.Order{}).Where("user_id = ? AND parent_id IS NULL", filter.UserID)
+	// 注意：不应用 filter.Status，聚合目的就是看各状态分布
+	if filter.OrderNo != "" {
+		query = query.Where("order_no LIKE ?", "%"+filter.OrderNo+"%")
+	}
+
+	type row struct {
+		Status string
+		Count  int64
+	}
+	var rows []row
+	if err := query.Select("status, COUNT(*) as count").Group("status").Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+
+	result := make(map[string]int64, len(rows))
+	for _, item := range rows {
+		result[item.Status] = item.Count
+	}
+	return result, nil
 }
 
 // ListByGuest 获取游客订单列表
