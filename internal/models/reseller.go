@@ -176,6 +176,9 @@ type ResellerLedgerEntry struct {
 	CreatedAt         time.Time      `gorm:"index" json:"created_at"`
 	UpdatedAt         time.Time      `gorm:"index" json:"updated_at"`
 	DeletedAt         gorm.DeletedAt `gorm:"index" json:"-"`
+
+	Profile *ResellerProfile `gorm:"foreignKey:ResellerID" json:"profile,omitempty"`
+	Order   *Order           `gorm:"foreignKey:OrderID" json:"order,omitempty"`
 }
 
 func (ResellerLedgerEntry) TableName() string { return "reseller_ledger_entries" }
@@ -195,6 +198,9 @@ type ResellerWithdrawRequest struct {
 	CreatedAt    time.Time      `gorm:"index" json:"created_at"`
 	UpdatedAt    time.Time      `gorm:"index" json:"updated_at"`
 	DeletedAt    gorm.DeletedAt `gorm:"index" json:"-"`
+
+	Profile   *ResellerProfile `gorm:"foreignKey:ResellerID" json:"profile,omitempty"`
+	Processor *Admin           `gorm:"foreignKey:ProcessedBy" json:"processor,omitempty"`
 }
 
 func (ResellerWithdrawRequest) TableName() string { return "reseller_withdraw_requests" }
@@ -213,6 +219,8 @@ type ResellerBalanceAccount struct {
 	CreatedAt            time.Time      `gorm:"index" json:"created_at"`
 	UpdatedAt            time.Time      `gorm:"index" json:"updated_at"`
 	DeletedAt            gorm.DeletedAt `gorm:"index" json:"-"`
+
+	Profile *ResellerProfile `gorm:"foreignKey:ResellerID" json:"profile,omitempty"`
 }
 
 func (ResellerBalanceAccount) TableName() string { return "reseller_balance_accounts" }

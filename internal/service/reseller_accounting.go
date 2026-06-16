@@ -26,12 +26,101 @@ type ResellerAccountingService struct {
 	confirmDays int
 }
 
+type ResellerAdminLedgerListFilter struct {
+	Page        int
+	PageSize    int
+	ResellerID  uint
+	UserID      uint
+	Keyword     string
+	Currency    string
+	Type        string
+	Status      string
+	OrderID     uint
+	OrderNo     string
+	CreatedFrom *time.Time
+	CreatedTo   *time.Time
+}
+
+type ResellerAdminBalanceAccountListFilter struct {
+	Page       int
+	PageSize   int
+	ResellerID uint
+	UserID     uint
+	Keyword    string
+	Currency   string
+	Status     string
+}
+
+type ResellerAdminWithdrawListFilter struct {
+	Page        int
+	PageSize    int
+	ResellerID  uint
+	UserID      uint
+	Keyword     string
+	Currency    string
+	Status      string
+	CreatedFrom *time.Time
+	CreatedTo   *time.Time
+}
+
 func NewResellerAccountingService(repo repository.ResellerRepository, opts ResellerAccountingOptions) *ResellerAccountingService {
 	days := opts.ConfirmDays
 	if days < 0 {
 		days = 0
 	}
 	return &ResellerAccountingService{repo: repo, confirmDays: days}
+}
+
+func (s *ResellerAccountingService) ListAdminLedgerEntries(filter ResellerAdminLedgerListFilter) ([]models.ResellerLedgerEntry, int64, error) {
+	if s == nil || s.repo == nil {
+		return []models.ResellerLedgerEntry{}, 0, nil
+	}
+	return s.repo.ListAdminResellerLedgerEntries(repository.ResellerAdminLedgerListFilter{
+		Page:        filter.Page,
+		PageSize:    filter.PageSize,
+		ResellerID:  filter.ResellerID,
+		UserID:      filter.UserID,
+		Keyword:     strings.TrimSpace(filter.Keyword),
+		Currency:    strings.TrimSpace(filter.Currency),
+		Type:        strings.TrimSpace(filter.Type),
+		Status:      strings.TrimSpace(filter.Status),
+		OrderID:     filter.OrderID,
+		OrderNo:     strings.TrimSpace(filter.OrderNo),
+		CreatedFrom: filter.CreatedFrom,
+		CreatedTo:   filter.CreatedTo,
+	})
+}
+
+func (s *ResellerAccountingService) ListAdminBalanceAccounts(filter ResellerAdminBalanceAccountListFilter) ([]models.ResellerBalanceAccount, int64, error) {
+	if s == nil || s.repo == nil {
+		return []models.ResellerBalanceAccount{}, 0, nil
+	}
+	return s.repo.ListAdminResellerBalanceAccounts(repository.ResellerAdminBalanceAccountListFilter{
+		Page:       filter.Page,
+		PageSize:   filter.PageSize,
+		ResellerID: filter.ResellerID,
+		UserID:     filter.UserID,
+		Keyword:    strings.TrimSpace(filter.Keyword),
+		Currency:   strings.TrimSpace(filter.Currency),
+		Status:     strings.TrimSpace(filter.Status),
+	})
+}
+
+func (s *ResellerAccountingService) ListAdminWithdrawRequests(filter ResellerAdminWithdrawListFilter) ([]models.ResellerWithdrawRequest, int64, error) {
+	if s == nil || s.repo == nil {
+		return []models.ResellerWithdrawRequest{}, 0, nil
+	}
+	return s.repo.ListAdminResellerWithdrawRequests(repository.ResellerAdminWithdrawListFilter{
+		Page:        filter.Page,
+		PageSize:    filter.PageSize,
+		ResellerID:  filter.ResellerID,
+		UserID:      filter.UserID,
+		Keyword:     strings.TrimSpace(filter.Keyword),
+		Currency:    strings.TrimSpace(filter.Currency),
+		Status:      strings.TrimSpace(filter.Status),
+		CreatedFrom: filter.CreatedFrom,
+		CreatedTo:   filter.CreatedTo,
+	})
 }
 
 func (s *ResellerAccountingService) PostOrderProfitTx(tx *gorm.DB, order *models.Order, payment *models.Payment) error {

@@ -164,6 +164,18 @@ func (r *resellerPricingRepoStub) ListWithdrawRequests(filter repository.Reselle
 	return []models.ResellerWithdrawRequest{}, 0, nil
 }
 
+func (r *resellerPricingRepoStub) ListAdminResellerLedgerEntries(filter repository.ResellerAdminLedgerListFilter) ([]models.ResellerLedgerEntry, int64, error) {
+	return []models.ResellerLedgerEntry{}, 0, nil
+}
+
+func (r *resellerPricingRepoStub) ListAdminResellerBalanceAccounts(filter repository.ResellerAdminBalanceAccountListFilter) ([]models.ResellerBalanceAccount, int64, error) {
+	return []models.ResellerBalanceAccount{}, 0, nil
+}
+
+func (r *resellerPricingRepoStub) ListAdminResellerWithdrawRequests(filter repository.ResellerAdminWithdrawListFilter) ([]models.ResellerWithdrawRequest, int64, error) {
+	return []models.ResellerWithdrawRequest{}, 0, nil
+}
+
 func testResellerProfile() *models.ResellerProfile {
 	return &models.ResellerProfile{
 		ID:                   10,

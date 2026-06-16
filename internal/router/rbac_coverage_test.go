@@ -19,7 +19,8 @@ import (
 // 目的：避免新增 admin 接口时忘记同步 RBAC 预置角色，导致非超管角色无法通过
 // 角色分配获得该权限（catalog UI 上能看到，但任何角色都拿不到）。
 //
-// 实现：静态扫描 router.go 提取 authorized.METHOD("/path", ...) 调用，与
+// 实现：静态扫描 router.go 提取 authorized.METHOD("/path", ...) 与
+// paymentProtected.METHOD("/path", ...) 调用，与
 // builtin role seeds 用 keyMatch2 比对（与运行时 Casbin 模型一致）。
 func TestAllAdminRoutesCoveredByBuiltinRoles(t *testing.T) {
 	routes, err := extractAdminRoutesFromSource()
@@ -81,7 +82,7 @@ type adminRoute struct {
 	object string // 例如 "/admin/users/:id"
 }
 
-// extractAdminRoutesFromSource 从 router.go 抽取所有 authorized.METHOD("/path", ...) 调用。
+// extractAdminRoutesFromSource 从 router.go 抽取 authorized/paymentProtected admin 路由调用。
 // 方法范围：GET / POST / PUT / PATCH / DELETE。HEAD/OPTIONS 不参与 RBAC。
 func extractAdminRoutesFromSource() ([]adminRoute, error) {
 	_, thisFile, _, _ := runtime.Caller(0)
@@ -90,7 +91,7 @@ func extractAdminRoutesFromSource() ([]adminRoute, error) {
 	if err != nil {
 		return nil, err
 	}
-	re := regexp.MustCompile(`authorized\.(GET|POST|PUT|PATCH|DELETE)\("([^"]+)"`)
+	re := regexp.MustCompile(`(?:authorized|paymentProtected)\.(GET|POST|PUT|PATCH|DELETE)\("([^"]+)"`)
 	matches := re.FindAllStringSubmatch(string(raw), -1)
 
 	seen := make(map[string]struct{}, len(matches))

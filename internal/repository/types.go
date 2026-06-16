@@ -85,6 +85,33 @@ type ResellerLedgerListFilter struct {
 	OrderID    uint
 }
 
+// ResellerAdminLedgerListFilter 管理端分销商账务流水过滤条件。
+type ResellerAdminLedgerListFilter struct {
+	Page        int
+	PageSize    int
+	ResellerID  uint
+	UserID      uint
+	Keyword     string
+	Currency    string
+	Type        string
+	Status      string
+	OrderID     uint
+	OrderNo     string
+	CreatedFrom *time.Time
+	CreatedTo   *time.Time
+}
+
+// ResellerAdminBalanceAccountListFilter 管理端分销商余额账户过滤条件。
+type ResellerAdminBalanceAccountListFilter struct {
+	Page       int
+	PageSize   int
+	ResellerID uint
+	UserID     uint
+	Keyword    string
+	Currency   string
+	Status     string
+}
+
 // ResellerWithdrawListFilter 分销商提现申请过滤条件。
 type ResellerWithdrawListFilter struct {
 	Page       int
@@ -92,6 +119,19 @@ type ResellerWithdrawListFilter struct {
 	ResellerID uint
 	Currency   string
 	Status     string
+}
+
+// ResellerAdminWithdrawListFilter 管理端分销商提现过滤条件。
+type ResellerAdminWithdrawListFilter struct {
+	Page        int
+	PageSize    int
+	ResellerID  uint
+	UserID      uint
+	Keyword     string
+	Currency    string
+	Status      string
+	CreatedFrom *time.Time
+	CreatedTo   *time.Time
 }
 
 // PaymentListFilter 查询支付列表的过滤条件

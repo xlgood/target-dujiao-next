@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/dujiao-next/internal/constants"
 	"github.com/dujiao-next/internal/models"
 	"github.com/glebarez/sqlite"
 	"github.com/shopspring/decimal"
@@ -19,6 +20,7 @@ func openResellerAccountingRepoTestDB(t *testing.T) *gorm.DB {
 		t.Fatalf("open sqlite failed: %v", err)
 	}
 	if err := db.AutoMigrate(
+		&models.Admin{},
 		&models.User{},
 		&models.Order{},
 		&models.Payment{},
@@ -48,6 +50,37 @@ func seedResellerAccountingProfile(t *testing.T, db *gorm.DB) models.ResellerPro
 		t.Fatalf("create reseller profile failed: %v", err)
 	}
 	return profile
+}
+
+func seedResellerAccountingProfileWithEmail(t *testing.T, db *gorm.DB, email string) models.ResellerProfile {
+	t.Helper()
+	user := models.User{Email: email, PasswordHash: "hash", Status: constants.UserStatusActive}
+	if err := db.Create(&user).Error; err != nil {
+		t.Fatalf("create user failed: %v", err)
+	}
+	profile := models.ResellerProfile{
+		UserID:           user.ID,
+		Status:           models.ResellerProfileStatusActive,
+		SettlementStatus: models.ResellerSettlementStatusNormal,
+	}
+	if err := db.Create(&profile).Error; err != nil {
+		t.Fatalf("create reseller profile failed: %v", err)
+	}
+	return profile
+}
+
+func seedResellerAccountingOrder(t *testing.T, db *gorm.DB, orderNo string) models.Order {
+	t.Helper()
+	order := models.Order{
+		OrderNo:     orderNo,
+		Status:      constants.OrderStatusPaid,
+		TotalAmount: models.NewMoneyFromDecimal(decimal.NewFromInt(100)),
+		Currency:    "USD",
+	}
+	if err := db.Create(&order).Error; err != nil {
+		t.Fatalf("create order failed: %v", err)
+	}
+	return order
 }
 
 func TestResellerAccountingRepositoryLedgerIdempotency(t *testing.T) {
@@ -135,5 +168,149 @@ func TestResellerAccountingRepositoryWithdrawLocksSameCurrencyOnly(t *testing.T)
 	}
 	if len(locked) != 1 || locked[0].Currency != "USD" {
 		t.Fatalf("expected only USD ledger, got %+v", locked)
+	}
+}
+
+func TestResellerAccountingRepositoryListAdminLedgerEntriesFiltersByKeywordAndOrderNo(t *testing.T) {
+	db := openResellerAccountingRepoTestDB(t)
+	repo := NewResellerRepository(db)
+	profile := seedResellerAccountingProfileWithEmail(t, db, "ledger-admin@example.com")
+	other := seedResellerAccountingProfileWithEmail(t, db, "other-ledger-admin@example.com")
+	order := seedResellerAccountingOrder(t, db, "RADMIN-ORDER-001")
+	now := time.Now().Add(-time.Hour)
+
+	entry := models.ResellerLedgerEntry{
+		ResellerID:     profile.ID,
+		OrderID:        &order.ID,
+		Type:           models.ResellerLedgerTypeOrderProfit,
+		Amount:         models.NewMoneyFromDecimal(decimal.NewFromInt(12)),
+		Currency:       "USD",
+		IdempotencyKey: "admin-ledger-filter-1",
+		Status:         models.ResellerLedgerStatusAvailable,
+		AvailableAt:    &now,
+	}
+	otherEntry := models.ResellerLedgerEntry{
+		ResellerID:     other.ID,
+		Type:           models.ResellerLedgerTypeOrderProfit,
+		Amount:         models.NewMoneyFromDecimal(decimal.NewFromInt(8)),
+		Currency:       "USD",
+		IdempotencyKey: "admin-ledger-filter-2",
+		Status:         models.ResellerLedgerStatusAvailable,
+	}
+	if err := db.Create(&entry).Error; err != nil {
+		t.Fatalf("create ledger failed: %v", err)
+	}
+	if err := db.Create(&otherEntry).Error; err != nil {
+		t.Fatalf("create other ledger failed: %v", err)
+	}
+
+	rows, total, err := repo.ListAdminResellerLedgerEntries(ResellerAdminLedgerListFilter{
+		Page:     1,
+		PageSize: 20,
+		Keyword:  "ledger-admin@example.com",
+		OrderNo:  "RADMIN-ORDER-001",
+		Currency: "USD",
+		Status:   models.ResellerLedgerStatusAvailable,
+	})
+	if err != nil {
+		t.Fatalf("ListAdminResellerLedgerEntries failed: %v", err)
+	}
+	if total != 1 || len(rows) != 1 {
+		t.Fatalf("expected one ledger row, total=%d len=%d rows=%+v", total, len(rows), rows)
+	}
+	if rows[0].Profile == nil || rows[0].Profile.User == nil || rows[0].Profile.User.Email != "ledger-admin@example.com" {
+		t.Fatalf("expected profile user preload, got %+v", rows[0].Profile)
+	}
+	if rows[0].Order == nil || rows[0].Order.OrderNo != "RADMIN-ORDER-001" {
+		t.Fatalf("expected order preload, got %+v", rows[0].Order)
+	}
+}
+
+func TestResellerAccountingRepositoryListAdminBalanceAccountsFiltersAndPreloadsProfile(t *testing.T) {
+	db := openResellerAccountingRepoTestDB(t)
+	repo := NewResellerRepository(db)
+	profile := seedResellerAccountingProfileWithEmail(t, db, "balance-admin@example.com")
+	other := seedResellerAccountingProfileWithEmail(t, db, "other-balance-admin@example.com")
+
+	rows := []models.ResellerBalanceAccount{
+		{
+			ResellerID:           profile.ID,
+			Currency:             "USD",
+			Status:               models.ResellerBalanceStatusNormal,
+			AvailableAmountCache: models.NewMoneyFromDecimal(decimal.NewFromInt(100)),
+			LockedAmountCache:    models.NewMoneyFromDecimal(decimal.NewFromInt(10)),
+			NegativeAmountCache:  models.NewMoneyFromDecimal(decimal.Zero),
+			LastLedgerEntryID:    99,
+		},
+		{
+			ResellerID:           other.ID,
+			Currency:             "CNY",
+			Status:               models.ResellerBalanceStatusNormal,
+			AvailableAmountCache: models.NewMoneyFromDecimal(decimal.NewFromInt(200)),
+		},
+	}
+	if err := db.Create(&rows).Error; err != nil {
+		t.Fatalf("create balance accounts failed: %v", err)
+	}
+
+	got, total, err := repo.ListAdminResellerBalanceAccounts(ResellerAdminBalanceAccountListFilter{
+		Page:     1,
+		PageSize: 20,
+		Keyword:  "balance-admin@example.com",
+		Currency: "USD",
+		Status:   models.ResellerBalanceStatusNormal,
+	})
+	if err != nil {
+		t.Fatalf("ListAdminResellerBalanceAccounts failed: %v", err)
+	}
+	if total != 1 || len(got) != 1 {
+		t.Fatalf("expected one balance row, total=%d len=%d rows=%+v", total, len(got), got)
+	}
+	if got[0].Profile == nil || got[0].Profile.User == nil || got[0].Profile.User.Email != "balance-admin@example.com" {
+		t.Fatalf("expected profile user preload, got %+v", got[0].Profile)
+	}
+}
+
+func TestResellerAccountingRepositoryListAdminWithdrawRequestsFiltersAndPreloadsProcessor(t *testing.T) {
+	db := openResellerAccountingRepoTestDB(t)
+	repo := NewResellerRepository(db)
+	profile := seedResellerAccountingProfileWithEmail(t, db, "withdraw-admin@example.com")
+	admin := models.Admin{Username: "reviewer", PasswordHash: "hash"}
+	if err := db.Create(&admin).Error; err != nil {
+		t.Fatalf("create admin failed: %v", err)
+	}
+	now := time.Now()
+	req := models.ResellerWithdrawRequest{
+		ResellerID:  profile.ID,
+		Amount:      models.NewMoneyFromDecimal(decimal.NewFromInt(50)),
+		Currency:    "USD",
+		Channel:     "USDT",
+		Account:     "TwithdrawAdmin",
+		Status:      models.ResellerWithdrawStatusPaid,
+		ProcessedBy: &admin.ID,
+		ProcessedAt: &now,
+	}
+	if err := db.Create(&req).Error; err != nil {
+		t.Fatalf("create withdraw request failed: %v", err)
+	}
+
+	got, total, err := repo.ListAdminResellerWithdrawRequests(ResellerAdminWithdrawListFilter{
+		Page:     1,
+		PageSize: 20,
+		Keyword:  "TwithdrawAdmin",
+		Currency: "USD",
+		Status:   models.ResellerWithdrawStatusPaid,
+	})
+	if err != nil {
+		t.Fatalf("ListAdminResellerWithdrawRequests failed: %v", err)
+	}
+	if total != 1 || len(got) != 1 {
+		t.Fatalf("expected one withdraw row, total=%d len=%d rows=%+v", total, len(got), got)
+	}
+	if got[0].Profile == nil || got[0].Profile.User == nil || got[0].Profile.User.Email != "withdraw-admin@example.com" {
+		t.Fatalf("expected profile user preload, got %+v", got[0].Profile)
+	}
+	if got[0].Processor == nil || got[0].Processor.Username != "reviewer" {
+		t.Fatalf("expected processor preload, got %+v", got[0].Processor)
 	}
 }

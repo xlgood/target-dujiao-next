@@ -476,3 +476,15 @@ func (r *resellerPricingRepoForPublicTest) UpdateWithdrawRequest(req *models.Res
 func (r *resellerPricingRepoForPublicTest) ListWithdrawRequests(filter repository.ResellerWithdrawListFilter) ([]models.ResellerWithdrawRequest, int64, error) {
 	return []models.ResellerWithdrawRequest{}, 0, nil
 }
+
+func (r *resellerPricingRepoForPublicTest) ListAdminResellerLedgerEntries(filter repository.ResellerAdminLedgerListFilter) ([]models.ResellerLedgerEntry, int64, error) {
+	return []models.ResellerLedgerEntry{}, 0, nil
+}
+
+func (r *resellerPricingRepoForPublicTest) ListAdminResellerBalanceAccounts(filter repository.ResellerAdminBalanceAccountListFilter) ([]models.ResellerBalanceAccount, int64, error) {
+	return []models.ResellerBalanceAccount{}, 0, nil
+}
+
+func (r *resellerPricingRepoForPublicTest) ListAdminResellerWithdrawRequests(filter repository.ResellerAdminWithdrawListFilter) ([]models.ResellerWithdrawRequest, int64, error) {
+	return []models.ResellerWithdrawRequest{}, 0, nil
+}

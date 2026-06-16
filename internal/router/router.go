@@ -355,6 +355,11 @@ func SetupRouter(cfg *config.Config, c *provider.Container) *gin.Engine {
 				paymentProtected.GET("/affiliates/withdraws", adminHandler.ListAffiliateWithdraws)
 				paymentProtected.POST("/affiliates/withdraws/:id/reject", adminHandler.RejectAffiliateWithdraw)
 				paymentProtected.POST("/affiliates/withdraws/:id/pay", adminHandler.PayAffiliateWithdraw)
+				paymentProtected.GET("/resellers/ledger-entries", adminHandler.ListResellerLedgerEntries)
+				paymentProtected.GET("/resellers/balance-accounts", adminHandler.ListResellerBalanceAccounts)
+				paymentProtected.GET("/resellers/withdraws", adminHandler.ListResellerWithdraws)
+				paymentProtected.POST("/resellers/withdraws/:id/reject", adminHandler.RejectResellerWithdraw)
+				paymentProtected.POST("/resellers/withdraws/:id/pay", adminHandler.PayResellerWithdraw)
 
 				// 权限管理
 				authorized.GET("/authz/me", adminHandler.GetAuthzMe)

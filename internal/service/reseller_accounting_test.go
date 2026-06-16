@@ -54,6 +54,38 @@ func seedResellerAccountingProfile(t *testing.T, db *gorm.DB) models.ResellerPro
 	return profile
 }
 
+func TestResellerAccountingServiceListAdminWithdrawRequests(t *testing.T) {
+	db := openResellerAccountingServiceTestDB(t)
+	repo := repository.NewResellerRepository(db)
+	svc := NewResellerAccountingService(repo, ResellerAccountingOptions{ConfirmDays: 7})
+	profile := seedResellerAccountingProfile(t, db)
+	req := models.ResellerWithdrawRequest{
+		ResellerID: profile.ID,
+		Amount:     models.NewMoneyFromDecimal(decimal.NewFromInt(25)),
+		Currency:   "USD",
+		Channel:    "USDT",
+		Account:    "TserviceWithdraw",
+		Status:     models.ResellerWithdrawStatusPending,
+	}
+	if err := db.Create(&req).Error; err != nil {
+		t.Fatalf("create withdraw failed: %v", err)
+	}
+
+	rows, total, err := svc.ListAdminWithdrawRequests(ResellerAdminWithdrawListFilter{
+		Page:       1,
+		PageSize:   20,
+		ResellerID: profile.ID,
+		Currency:   " USD ",
+		Status:     " pending ",
+	})
+	if err != nil {
+		t.Fatalf("ListAdminWithdrawRequests failed: %v", err)
+	}
+	if total != 1 || len(rows) != 1 || rows[0].ID != req.ID {
+		t.Fatalf("expected created withdraw, total=%d rows=%+v", total, rows)
+	}
+}
+
 func seedPaidResellerOrderSnapshot(t *testing.T, db *gorm.DB, eligible bool) (models.Order, models.Payment, models.ResellerOrderSnapshot) {
 	t.Helper()
 	user := models.User{Email: fmt.Sprintf("buyer-%d@example.test", time.Now().UnixNano()), PasswordHash: "x"}
