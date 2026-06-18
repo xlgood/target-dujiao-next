@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	"github.com/dujiao-next/internal/config"
+	"github.com/dujiao-next/internal/http/response"
 	"github.com/dujiao-next/internal/models"
 	"github.com/dujiao-next/internal/provider"
 	"github.com/dujiao-next/internal/repository"
@@ -96,6 +98,35 @@ func TestAdminResellerManagementApproveProfileCreatesDomainAndAudit(t *testing.T
 	}
 	if auditCount != 1 {
 		t.Fatalf("expected one audit log, got %d", auditCount)
+	}
+}
+
+func TestAdminResellerManagementApproveProfileReportsMissingSubdomainBase(t *testing.T) {
+	h, db := setupAdminResellerManagementHandlerTest(t)
+	h.ResellerManagementService = service.NewResellerManagementService(h.ResellerRepo, config.ResellerConfig{
+		Enabled:          true,
+		SelfApplyEnabled: true,
+	})
+	profile := seedAdminResellerManagementProfile(t, db, models.ResellerProfileStatusPendingReview)
+	c, recorder := newAdminResellerManagementContext(http.MethodPost, fmt.Sprintf("/admin/resellers/profiles/%d/approve", profile.ID), strings.NewReader(`{"default_markup_percent":"8.00","max_markup_percent":"40.00"}`))
+	c.Params = gin.Params{{Key: "id", Value: fmt.Sprintf("%d", profile.ID)}}
+
+	h.ApproveResellerProfile(c)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected http 200 envelope, got %d body=%s", recorder.Code, recorder.Body.String())
+	}
+	var resp struct {
+		StatusCode int    `json:"status_code"`
+		Msg        string `json:"msg"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response failed: %v", err)
+	}
+	if resp.StatusCode != response.CodeBadRequest {
+		t.Fatalf("expected status_code=400, got %+v body=%s", resp, recorder.Body.String())
+	}
+	if !strings.Contains(resp.Msg, "分销系统二级域名基础域名未配置") {
+		t.Fatalf("expected missing subdomain base message, got %+v body=%s", resp, recorder.Body.String())
 	}
 }
 

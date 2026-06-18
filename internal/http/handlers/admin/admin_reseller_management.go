@@ -264,9 +264,10 @@ func respondAdminResellerManagementError(c *gin.Context, err error) {
 		errors.Is(err, service.ErrResellerDomainInvalid),
 		errors.Is(err, service.ErrResellerSiteConfigInvalid),
 		errors.Is(err, service.ErrResellerDomainMainHostNotAllowed),
-		errors.Is(err, service.ErrResellerDomainConflict),
-		errors.Is(err, service.ErrResellerSubdomainBaseMissing):
+		errors.Is(err, service.ErrResellerDomainConflict):
 		shared.RespondError(c, response.CodeBadRequest, "error.bad_request", nil)
+	case errors.Is(err, service.ErrResellerSubdomainBaseMissing):
+		shared.RespondError(c, response.CodeBadRequest, "error.reseller_subdomain_base_missing", nil)
 	default:
 		shared.RespondError(c, response.CodeInternal, "error.save_failed", err)
 	}
