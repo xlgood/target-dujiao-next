@@ -185,6 +185,7 @@ func SetupRouter(cfg *config.Config, c *provider.Container) *gin.Engine {
 			user.POST("/reseller/domains", publicHandler.SubmitResellerCustomDomain)
 			user.GET("/reseller/site-config", publicHandler.GetResellerSiteConfig)
 			user.PUT("/reseller/site-config", publicHandler.UpdateResellerSiteConfig)
+			user.POST("/reseller/upload", publicHandler.UploadResellerImage)
 			user.GET("/reseller/product-settings", publicHandler.ListResellerProductSettings)
 			user.GET("/reseller/product-settings/:product_id", publicHandler.GetResellerProductSetting)
 			user.PUT("/reseller/product-settings/:product_id", publicHandler.UpdateResellerProductSettings)

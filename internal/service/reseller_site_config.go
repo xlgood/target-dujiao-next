@@ -86,6 +86,22 @@ func trimLimit(raw string, max int) string {
 	return value
 }
 
+// ResellerSiteConfigFieldError 在站点配置校验失败时携带具体字段，便于前端给出精确提示。
+// 通过 Unwrap 兼容既有的 errors.Is(err, ErrResellerSiteConfigInvalid) 判断。
+type ResellerSiteConfigFieldError struct {
+	Field string
+}
+
+func (e *ResellerSiteConfigFieldError) Error() string {
+	return "reseller site config field invalid: " + e.Field
+}
+
+func (e *ResellerSiteConfigFieldError) Unwrap() error { return ErrResellerSiteConfigInvalid }
+
+func newResellerFieldError(field string) error {
+	return &ResellerSiteConfigFieldError{Field: field}
+}
+
 func normalizeResellerLocalizedText(raw LocalizedTextInput, max int) models.JSON {
 	out := models.JSON{}
 	for _, lang := range []string{"zh-CN", "zh-TW", "en-US"} {
@@ -137,11 +153,11 @@ func validateSupportURL(raw string) (string, error) {
 func normalizeResellerSupport(input ResellerSupportInput) (models.JSON, error) {
 	telegram := trimLimit(input.Telegram, 500)
 	if telegram != "" && !strings.HasPrefix(telegram, "https://t.me/") && !strings.HasPrefix(telegram, "tg://") {
-		return nil, ErrResellerSiteConfigInvalid
+		return nil, newResellerFieldError("support_telegram")
 	}
 	whatsApp := trimLimit(input.WhatsApp, 500)
 	if whatsApp != "" && !strings.HasPrefix(whatsApp, "https://wa.me/") && !strings.HasPrefix(whatsApp, "https://api.whatsapp.com/") {
-		return nil, ErrResellerSiteConfigInvalid
+		return nil, newResellerFieldError("support_whatsapp")
 	}
 	email := trimLimit(input.Email, 320)
 	if strings.HasPrefix(email, "mailto:") {
@@ -149,12 +165,12 @@ func normalizeResellerSupport(input ResellerSupportInput) (models.JSON, error) {
 	}
 	if email != "" {
 		if _, err := mail.ParseAddress(email); err != nil {
-			return nil, ErrResellerSiteConfigInvalid
+			return nil, newResellerFieldError("support_email")
 		}
 	}
 	supportURL, err := validateSupportURL(input.SupportURL)
 	if err != nil {
-		return nil, err
+		return nil, newResellerFieldError("support_url")
 	}
 	return models.JSON{"telegram": telegram, "whatsapp": whatsApp, "email": email, "support_url": supportURL}, nil
 }
@@ -175,7 +191,7 @@ func normalizeResellerAnnouncement(input ResellerAnnouncementInput) models.JSON 
 func normalizeResellerSEO(input ResellerSEOInput) (models.JSON, error) {
 	image, err := validateHTTPOrUploadPath(input.DefaultOGImage)
 	if err != nil {
-		return nil, err
+		return nil, newResellerFieldError("image")
 	}
 	return models.JSON{
 		"title":            normalizeResellerLocalizedText(input.Title, 120),
@@ -193,7 +209,7 @@ func normalizeResellerFooterLinks(input []ResellerFooterLinkInput) (models.JSON,
 		}
 		urlValue, err := validateSupportURL(item.URL)
 		if err != nil {
-			return nil, err
+			return nil, newResellerFieldError("link")
 		}
 		if urlValue == "" {
 			continue
@@ -237,11 +253,11 @@ func normalizeResellerTheme(input ResellerThemeInput) models.JSON {
 func (s *ResellerSiteConfigService) buildModel(resellerID uint, input ResellerSiteConfigInput) (*models.ResellerSiteConfig, error) {
 	logo, err := validateHTTPOrUploadPath(input.Logo)
 	if err != nil {
-		return nil, err
+		return nil, newResellerFieldError("image")
 	}
 	favicon, err := validateHTTPOrUploadPath(input.Favicon)
 	if err != nil {
-		return nil, err
+		return nil, newResellerFieldError("image")
 	}
 	support, err := normalizeResellerSupport(input.Support)
 	if err != nil {

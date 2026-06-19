@@ -90,6 +90,31 @@ func TestResellerSiteConfigServiceRejectsUnsafeURLs(t *testing.T) {
 	}
 }
 
+func TestResellerSiteConfigServiceReturnsFieldErrorForInvalidSupport(t *testing.T) {
+	db := openResellerManagementServiceTestDB(t)
+	repo := repository.NewResellerRepository(db)
+	user := seedResellerManagementUser(t, db, "site-config-field@example.test")
+	profile := models.ResellerProfile{UserID: user.ID, Status: models.ResellerProfileStatusActive, SettlementStatus: models.ResellerSettlementStatusNormal}
+	if err := db.Create(&profile).Error; err != nil {
+		t.Fatalf("create profile failed: %v", err)
+	}
+	svc := NewResellerSiteConfigService(repo)
+	_, err := svc.UpdateUserSiteConfig(context.Background(), user.ID, ResellerSiteConfigInput{
+		SiteName: "Field Store",
+		Support:  ResellerSupportInput{WhatsApp: "https://w.me/123"},
+	})
+	if !errors.Is(err, ErrResellerSiteConfigInvalid) {
+		t.Fatalf("expected invalid site config error, got %v", err)
+	}
+	var fieldErr *ResellerSiteConfigFieldError
+	if !errors.As(err, &fieldErr) {
+		t.Fatalf("expected field error, got %v", err)
+	}
+	if fieldErr.Field != "support_whatsapp" {
+		t.Fatalf("expected support_whatsapp field, got %q", fieldErr.Field)
+	}
+}
+
 func TestResellerSiteConfigServiceApplyPublicConfigOverlay(t *testing.T) {
 	db := openResellerManagementServiceTestDB(t)
 	repo := repository.NewResellerRepository(db)
