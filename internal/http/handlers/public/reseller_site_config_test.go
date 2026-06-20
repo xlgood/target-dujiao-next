@@ -37,4 +37,7 @@ func TestPublicResellerSiteConfigUpdateAndGet(t *testing.T) {
 	if !strings.Contains(recorder.Body.String(), `"site_name":"Alice Store"`) {
 		t.Fatalf("expected saved site name in response, got %s", recorder.Body.String())
 	}
+	if strings.Contains(recorder.Body.String(), `"theme"`) {
+		t.Fatalf("expected theme to be omitted from response, got %s", recorder.Body.String())
+	}
 }

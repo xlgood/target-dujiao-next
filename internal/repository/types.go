@@ -107,6 +107,7 @@ type ResellerOrderSnapshotRow struct {
 	Order         models.Order
 	Items         []models.OrderItem
 	LedgerEntries []models.ResellerLedgerEntry
+	BuyerEmail    string
 }
 
 // ResellerOrderStatsRow 分销商视角销售订单统计。

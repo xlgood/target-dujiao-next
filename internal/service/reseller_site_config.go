@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"net/mail"
 	"net/url"
-	"regexp"
 	"strings"
 
 	"github.com/dujiao-next/internal/cache"
@@ -46,12 +45,6 @@ type ResellerNavConfigInput struct {
 	CustomItems []ResellerFooterLinkInput `json:"custom_items"`
 }
 
-type ResellerThemeInput struct {
-	PrimaryColor string `json:"primary_color"`
-	AccentColor  string `json:"accent_color"`
-	SurfaceColor string `json:"surface_color"`
-}
-
 type ResellerSiteConfigInput struct {
 	SiteName     string                    `json:"site_name"`
 	Logo         string                    `json:"logo"`
@@ -61,7 +54,6 @@ type ResellerSiteConfigInput struct {
 	SEO          ResellerSEOInput          `json:"seo"`
 	FooterLinks  []ResellerFooterLinkInput `json:"footer_links"`
 	NavConfig    ResellerNavConfigInput    `json:"nav_config"`
-	Theme        ResellerThemeInput        `json:"theme"`
 }
 
 type ResellerSiteConfigService struct {
@@ -71,8 +63,6 @@ type ResellerSiteConfigService struct {
 func NewResellerSiteConfigService(repo repository.ResellerRepository) *ResellerSiteConfigService {
 	return &ResellerSiteConfigService{repo: repo}
 }
-
-var resellerHexColorPattern = regexp.MustCompile(`^#[0-9a-fA-F]{6}$`)
 
 func trimLimit(raw string, max int) string {
 	value := strings.TrimSpace(raw)
@@ -236,20 +226,6 @@ func normalizeResellerNavConfig(input ResellerNavConfigInput) (models.JSON, erro
 	return models.JSON{"builtin": builtin, "custom_items": custom["items"]}, nil
 }
 
-func normalizeResellerTheme(input ResellerThemeInput) models.JSON {
-	out := models.JSON{}
-	if resellerHexColorPattern.MatchString(strings.TrimSpace(input.PrimaryColor)) {
-		out["primary_color"] = strings.TrimSpace(input.PrimaryColor)
-	}
-	if resellerHexColorPattern.MatchString(strings.TrimSpace(input.AccentColor)) {
-		out["accent_color"] = strings.TrimSpace(input.AccentColor)
-	}
-	if resellerHexColorPattern.MatchString(strings.TrimSpace(input.SurfaceColor)) {
-		out["surface_color"] = strings.TrimSpace(input.SurfaceColor)
-	}
-	return out
-}
-
 func (s *ResellerSiteConfigService) buildModel(resellerID uint, input ResellerSiteConfigInput) (*models.ResellerSiteConfig, error) {
 	logo, err := validateHTTPOrUploadPath(input.Logo)
 	if err != nil {
@@ -285,7 +261,7 @@ func (s *ResellerSiteConfigService) buildModel(resellerID uint, input ResellerSi
 		SEOJSON:          seo,
 		FooterLinksJSON:  footerLinks,
 		NavConfigJSON:    navConfig,
-		ThemeJSON:        normalizeResellerTheme(input.Theme),
+		ThemeJSON:        models.JSON{},
 	}, nil
 }
 
@@ -477,8 +453,5 @@ func applyResellerSiteConfigToPublicConfig(out map[string]interface{}, cfg *mode
 	}
 	if len(cfg.NavConfigJSON) > 0 {
 		out["nav_config"] = cfg.NavConfigJSON
-	}
-	if len(cfg.ThemeJSON) > 0 {
-		out["theme"] = cfg.ThemeJSON
 	}
 }

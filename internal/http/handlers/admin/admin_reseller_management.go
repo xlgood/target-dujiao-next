@@ -25,6 +25,18 @@ type ResellerProfileReasonRequest struct {
 	Reason string `json:"reason"`
 }
 
+type ResellerProfileUpdateRequest struct {
+	DefaultMarkupPercent string `json:"default_markup_percent"`
+	MaxMarkupPercent     string `json:"max_markup_percent"`
+	SettlementStatus     string `json:"settlement_status"`
+	Reason               string `json:"reason"`
+}
+
+type ResellerSystemDomainRequest struct {
+	Subdomain string `json:"subdomain"`
+	Domain    string `json:"domain"`
+}
+
 // ListResellerProfiles 管理端分销商资料列表。
 func (h *Handler) ListResellerProfiles(c *gin.Context) {
 	if h.ResellerRepo == nil {
@@ -48,6 +60,90 @@ func (h *Handler) ListResellerProfiles(c *gin.Context) {
 		return
 	}
 	response.SuccessWithPage(c, rows, response.BuildPagination(page, pageSize, total))
+}
+
+// GetResellerProfileDetail 管理端分销商运营详情。
+func (h *Handler) GetResellerProfileDetail(c *gin.Context) {
+	if h.ResellerRepo == nil {
+		shared.RespondError(c, response.CodeInternal, "error.user_fetch_failed", nil)
+		return
+	}
+	id, err := shared.ParseParamUint(c, "id")
+	if err != nil {
+		shared.RespondError(c, response.CodeBadRequest, "error.bad_request", nil)
+		return
+	}
+	profile, err := h.ResellerRepo.GetProfileByID(id)
+	if err != nil {
+		shared.RespondError(c, response.CodeInternal, "error.user_fetch_failed", err)
+		return
+	}
+	if profile == nil {
+		shared.RespondError(c, response.CodeNotFound, "error.bad_request", nil)
+		return
+	}
+	domains, err := h.ResellerRepo.ListDomainsByResellerID(id)
+	if err != nil {
+		shared.RespondError(c, response.CodeInternal, "error.user_fetch_failed", err)
+		return
+	}
+	siteConfig, err := h.ResellerRepo.GetSiteConfigByResellerID(id)
+	if err != nil {
+		shared.RespondError(c, response.CodeInternal, "error.user_fetch_failed", err)
+		return
+	}
+	productSummary := service.ResellerProductSettingSummary{}
+	if h.ResellerProductSettingService != nil {
+		productSummary, err = h.ResellerProductSettingService.SummarizeAdminSettings(id)
+		if err != nil {
+			shared.RespondError(c, response.CodeInternal, "error.user_fetch_failed", err)
+			return
+		}
+	}
+	balances := make([]models.ResellerBalanceAccount, 0)
+	recentLedgerEntries := make([]models.ResellerLedgerEntry, 0)
+	recentWithdraws := make([]models.ResellerWithdrawRequest, 0)
+	if h.ResellerAccountingService != nil {
+		balances, _, err = h.ResellerAccountingService.ListAdminBalanceAccounts(service.ResellerAdminBalanceAccountListFilter{
+			Page:       1,
+			PageSize:   20,
+			ResellerID: id,
+		})
+		if err != nil {
+			shared.RespondError(c, response.CodeInternal, "error.user_fetch_failed", err)
+			return
+		}
+		recentLedgerEntries, _, err = h.ResellerAccountingService.ListAdminLedgerEntries(service.ResellerAdminLedgerListFilter{
+			Page:       1,
+			PageSize:   10,
+			ResellerID: id,
+		})
+		if err != nil {
+			shared.RespondError(c, response.CodeInternal, "error.user_fetch_failed", err)
+			return
+		}
+		recentWithdraws, _, err = h.ResellerAccountingService.ListAdminWithdrawRequests(service.ResellerAdminWithdrawListFilter{
+			Page:       1,
+			PageSize:   10,
+			ResellerID: id,
+		})
+		if err != nil {
+			shared.RespondError(c, response.CodeInternal, "error.user_fetch_failed", err)
+			return
+		}
+	}
+	recentOrders := make([]service.ResellerOrderListItem, 0)
+	if h.ResellerOrderService != nil {
+		recentOrders, _, err = h.ResellerOrderService.ListAdminOrders(id, service.ResellerOrderListInput{
+			Page:     1,
+			PageSize: 10,
+		})
+		if err != nil {
+			respondAdminResellerManagementError(c, err)
+			return
+		}
+	}
+	response.Success(c, dto.NewAdminResellerProfileDetailResp(profile, domains, siteConfig, productSummary, balances, recentOrders, recentLedgerEntries, recentWithdraws))
 }
 
 // ListResellerDomains 管理端分销域名列表。
@@ -122,7 +218,103 @@ func (h *Handler) ApproveResellerProfile(c *gin.Context) {
 		"reseller_id": id,
 		"next_status": models.ResellerProfileStatusActive,
 	})
-	response.Success(c, gin.H{"profile": result.Profile, "system_domain": dto.NewResellerDomainResp(result.SystemDomain)})
+	var systemDomain any
+	if result.SystemDomain != nil {
+		row := dto.NewResellerDomainResp(result.SystemDomain)
+		systemDomain = row
+	}
+	response.Success(c, gin.H{"profile": result.Profile, "system_domain": systemDomain})
+}
+
+// UpdateResellerProfile 更新分销商运营配置。
+func (h *Handler) UpdateResellerProfile(c *gin.Context) {
+	adminID, ok := shared.GetAdminID(c)
+	if !ok {
+		return
+	}
+	if h.ResellerManagementService == nil {
+		shared.RespondError(c, response.CodeInternal, "error.save_failed", nil)
+		return
+	}
+	id, err := shared.ParseParamUint(c, "id")
+	if err != nil {
+		shared.RespondError(c, response.CodeBadRequest, "error.bad_request", nil)
+		return
+	}
+	var req ResellerProfileUpdateRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		shared.RespondBindError(c, err)
+		return
+	}
+	defaultMarkup, err := parseOptionalDecimal(req.DefaultMarkupPercent)
+	if err != nil {
+		shared.RespondError(c, response.CodeBadRequest, "error.bad_request", nil)
+		return
+	}
+	maxMarkup, err := parseOptionalDecimal(req.MaxMarkupPercent)
+	if err != nil {
+		shared.RespondError(c, response.CodeBadRequest, "error.bad_request", nil)
+		return
+	}
+	row, err := h.ResellerManagementService.UpdateProfileOperationalConfig(adminID, id, service.ResellerProfileUpdateInput{
+		DefaultMarkupPercent: defaultMarkup,
+		MaxMarkupPercent:     maxMarkup,
+		SettlementStatus:     req.SettlementStatus,
+		Reason:               req.Reason,
+	})
+	if err != nil {
+		respondAdminResellerManagementError(c, err)
+		return
+	}
+	h.recordResellerAudit(c, "reseller_profile_update", "/admin/resellers/profiles/:id", gin.H{
+		"profile_id":             id,
+		"reseller_id":            id,
+		"default_markup_percent": row.DefaultMarkupPercent.String(),
+		"max_markup_percent":     row.MaxMarkupPercent.String(),
+		"settlement_status":      row.SettlementStatus,
+		"reason":                 strings.TrimSpace(req.Reason),
+	})
+	response.Success(c, dto.NewAdminResellerProfileResp(row))
+}
+
+// AssignResellerSystemDomain 为分销商分配或编辑系统二级域名。
+func (h *Handler) AssignResellerSystemDomain(c *gin.Context) {
+	adminID, ok := shared.GetAdminID(c)
+	if !ok {
+		return
+	}
+	if h.ResellerManagementService == nil {
+		shared.RespondError(c, response.CodeInternal, "error.save_failed", nil)
+		return
+	}
+	id, err := shared.ParseParamUint(c, "id")
+	if err != nil {
+		shared.RespondError(c, response.CodeBadRequest, "error.bad_request", nil)
+		return
+	}
+	var req ResellerSystemDomainRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		shared.RespondBindError(c, err)
+		return
+	}
+	rawSubdomain := strings.TrimSpace(req.Subdomain)
+	if rawSubdomain == "" {
+		rawSubdomain = strings.TrimSpace(req.Domain)
+	}
+	row, err := h.ResellerManagementService.AssignSystemSubdomain(c.Request.Context(), adminID, id, service.ResellerSystemDomainInput{
+		Subdomain: rawSubdomain,
+	})
+	if err != nil {
+		respondAdminResellerManagementError(c, err)
+		return
+	}
+	h.recordResellerAudit(c, "reseller_profile_system_domain_update", "/admin/resellers/profiles/:id/system-domain", gin.H{
+		"profile_id":  id,
+		"reseller_id": id,
+		"domain_id":   row.ID,
+		"domain":      row.Domain,
+	})
+	response.Success(c, dto.NewResellerDomainResp(row))
 }
 
 // RejectResellerProfile 拒绝分销商申请。
@@ -171,6 +363,11 @@ func (h *Handler) ApproveResellerDomain(c *gin.Context) {
 // DisableResellerDomain 禁用域名。
 func (h *Handler) DisableResellerDomain(c *gin.Context) {
 	h.handleResellerDomainAction(c, "reseller_domain_disable", "/admin/resellers/domains/:id/disable", h.ResellerManagementService.DisableDomain)
+}
+
+// SetPrimaryResellerDomain 将已启用且已验证域名设为主域名。
+func (h *Handler) SetPrimaryResellerDomain(c *gin.Context) {
+	h.handleResellerDomainAction(c, "reseller_domain_set_primary", "/admin/resellers/domains/:id/set-primary", h.ResellerManagementService.SetPrimaryDomain)
 }
 
 func (h *Handler) handleResellerProfileReasonAction(
@@ -244,12 +441,16 @@ func (h *Handler) handleResellerDomainAction(
 }
 
 func (h *Handler) recordResellerAudit(c *gin.Context, action string, object string, detail gin.H) {
+	method := "POST"
+	if c.Request != nil && c.Request.Method != "" {
+		method = c.Request.Method
+	}
 	h.recordAuthzAudit(c, service.AuthzAuditRecordInput{
 		OperatorAdminID:  c.GetUint("admin_id"),
 		OperatorUsername: c.GetString("username"),
 		Action:           action,
 		Object:           object,
-		Method:           "POST",
+		Method:           method,
 		RequestID:        strings.TrimSpace(c.GetString("request_id")),
 		Detail:           models.JSON(detail),
 	})

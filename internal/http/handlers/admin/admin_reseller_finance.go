@@ -36,7 +36,6 @@ func (h *Handler) ListResellerLedgerEntries(c *gin.Context) {
 		ResellerID:  resellerID,
 		UserID:      userID,
 		Keyword:     strings.TrimSpace(c.Query("keyword")),
-		Currency:    strings.TrimSpace(c.Query("currency")),
 		Type:        strings.TrimSpace(c.Query("type")),
 		Status:      strings.TrimSpace(c.Query("status")),
 		OrderID:     orderID,
@@ -67,7 +66,6 @@ func (h *Handler) ListResellerBalanceAccounts(c *gin.Context) {
 		ResellerID: resellerID,
 		UserID:     userID,
 		Keyword:    strings.TrimSpace(c.Query("keyword")),
-		Currency:   strings.TrimSpace(c.Query("currency")),
 		Status:     strings.TrimSpace(c.Query("status")),
 	})
 	if err != nil {
@@ -95,7 +93,6 @@ func (h *Handler) ListResellerWithdraws(c *gin.Context) {
 		ResellerID:  resellerID,
 		UserID:      userID,
 		Keyword:     strings.TrimSpace(c.Query("keyword")),
-		Currency:    strings.TrimSpace(c.Query("currency")),
 		Status:      strings.TrimSpace(c.Query("status")),
 		CreatedFrom: createdFrom,
 		CreatedTo:   createdTo,

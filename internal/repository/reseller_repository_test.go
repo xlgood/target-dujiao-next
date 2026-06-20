@@ -83,6 +83,10 @@ func TestResellerRepositoryUpsertDomainRestoresSoftDeleted(t *testing.T) {
 func TestResellerRepositoryFindActiveVerifiedDomain(t *testing.T) {
 	db := openResellerRepoTestDB(t)
 	profile := seedResellerProfile(t, db, "owner2@example.com")
+	inactiveProfile := seedResellerProfile(t, db, "disabled-owner@example.com")
+	if err := db.Model(&inactiveProfile).Update("status", models.ResellerProfileStatusDisabled).Error; err != nil {
+		t.Fatalf("disable profile failed: %v", err)
+	}
 	repo := NewResellerRepository(db)
 	if _, err := repo.UpsertDomain(models.ResellerDomain{
 		ResellerID:         profile.ID,
@@ -103,12 +107,28 @@ func TestResellerRepositoryFindActiveVerifiedDomain(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("create active domain failed: %v", err)
 	}
+	if _, err := repo.UpsertDomain(models.ResellerDomain{
+		ResellerID:         inactiveProfile.ID,
+		Domain:             "disabled-profile.example.test",
+		Type:               models.ResellerDomainTypeCustom,
+		Status:             models.ResellerDomainStatusActive,
+		VerificationStatus: models.ResellerDomainVerificationVerified,
+	}); err != nil {
+		t.Fatalf("create disabled profile domain failed: %v", err)
+	}
 	disabled, err := repo.FindActiveVerifiedDomain("inactive.example.test")
 	if err != nil {
 		t.Fatalf("lookup disabled failed: %v", err)
 	}
 	if disabled != nil {
 		t.Fatalf("disabled domain should not resolve: %+v", disabled)
+	}
+	inactiveProfileDomain, err := repo.FindActiveVerifiedDomain("disabled-profile.example.test")
+	if err != nil {
+		t.Fatalf("lookup disabled profile domain failed: %v", err)
+	}
+	if inactiveProfileDomain != nil {
+		t.Fatalf("active domain for disabled profile should not resolve: %+v", inactiveProfileDomain)
 	}
 	active, err := repo.FindActiveVerifiedDomain("active.example.test")
 	if err != nil {

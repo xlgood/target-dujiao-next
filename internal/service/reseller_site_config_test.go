@@ -52,7 +52,6 @@ func TestResellerSiteConfigServiceNormalizesAndStoresSafeFields(t *testing.T) {
 			Title:       LocalizedTextInput{"zh-CN": "爱丽丝商店", "zh-TW": "愛麗絲商店", "en-US": "Alice Store"},
 			Description: LocalizedTextInput{"zh-CN": "精选商品", "en-US": "Curated products"},
 		},
-		Theme: ResellerThemeInput{PrimaryColor: "#2563eb", AccentColor: "#16a34a", SurfaceColor: "red"},
 	})
 	if err != nil {
 		t.Fatalf("update site config failed: %v", err)
@@ -67,8 +66,8 @@ func TestResellerSiteConfigServiceNormalizesAndStoresSafeFields(t *testing.T) {
 	if _, exists := announcementTitle["fr-FR"]; exists {
 		t.Fatalf("unexpected unsupported locale retained: %+v", announcementTitle)
 	}
-	if row.ThemeJSON["primary_color"] != "#2563eb" || row.ThemeJSON["surface_color"] != nil {
-		t.Fatalf("unexpected theme json: %+v", row.ThemeJSON)
+	if len(row.ThemeJSON) != 0 {
+		t.Fatalf("expected theme config to be ignored, got: %+v", row.ThemeJSON)
 	}
 }
 

@@ -236,6 +236,45 @@ func TestResellerOrderServiceListUsesSnapshotAndHidesRiskFields(t *testing.T) {
 	}
 }
 
+func TestResellerOrderServiceBuyerLabelMasksMemberEmail(t *testing.T) {
+	db := openResellerOrderServiceTestDB(t)
+	profile, order, _ := seedResellerOrderFixture(t, db, "reseller-buyer-label@example.test")
+	buyer := models.User{
+		Email:        "buyer-label@example.test",
+		PasswordHash: "hash",
+		Status:       constants.UserStatusActive,
+	}
+	if err := db.Create(&buyer).Error; err != nil {
+		t.Fatalf("create buyer user failed: %v", err)
+	}
+	if err := db.Model(&models.Order{}).Where("id = ?", order.ID).Update("user_id", buyer.ID).Error; err != nil {
+		t.Fatalf("update order buyer failed: %v", err)
+	}
+	if err := db.Model(&models.ResellerOrderSnapshot{}).Where("order_id = ?", order.ID).Update("buyer_user_id", buyer.ID).Error; err != nil {
+		t.Fatalf("update snapshot buyer failed: %v", err)
+	}
+	svc := NewResellerOrderService(repository.NewResellerRepository(db))
+
+	rows, _, err := svc.ListUserOrders(profile.UserID, ResellerOrderListInput{Page: 1, PageSize: 20})
+	if err != nil {
+		t.Fatalf("ListUserOrders failed: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("expected one row, got %d", len(rows))
+	}
+	if rows[0].BuyerLabel != "b***@example.test" {
+		t.Fatalf("member buyer label should mask email instead of hardcoded user, got %q", rows[0].BuyerLabel)
+	}
+
+	detail, err := svc.GetUserOrderDetail(profile.UserID, order.OrderNo)
+	if err != nil {
+		t.Fatalf("GetUserOrderDetail failed: %v", err)
+	}
+	if detail.BuyerLabel != "b***@example.test" {
+		t.Fatalf("member detail buyer label should mask email instead of hardcoded user, got %q", detail.BuyerLabel)
+	}
+}
+
 func TestResellerOrderServiceProfitStatusRequiresAvailableLedger(t *testing.T) {
 	db := openResellerOrderServiceTestDB(t)
 	profile, order, snapshot := seedResellerOrderFixture(t, db, "reseller-ledger-status@example.test")

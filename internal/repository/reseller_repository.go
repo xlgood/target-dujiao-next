@@ -47,6 +47,7 @@ type ResellerRepository interface {
 	ListDueLedgerScopes(now time.Time) ([]ResellerLedgerScope, error)
 	ListLedgerEntries(filter ResellerLedgerListFilter) ([]models.ResellerLedgerEntry, int64, error)
 	SumLedgerAmount(resellerID uint, currency string, statuses []string) (decimal.Decimal, error)
+	SumLedgerAmountByOrderAndType(orderID uint, ledgerType string) (decimal.Decimal, error)
 	SumLedgerAmountGroupedByStatus(resellerID uint, currency string, statuses []string) (map[string]decimal.Decimal, error)
 	GetOrCreateBalanceAccountForUpdate(resellerID uint, currency string) (*models.ResellerBalanceAccount, error)
 	ListBalanceAccounts(filter ResellerBalanceAccountListFilter) ([]models.ResellerBalanceAccount, int64, error)
@@ -267,7 +268,9 @@ func (r *GormResellerRepository) FindActiveVerifiedDomain(host string) (*models.
 	}
 	var row models.ResellerDomain
 	err := r.db.Preload("Profile").
-		Where("domain = ? AND status = ? AND verification_status = ?", domain, models.ResellerDomainStatusActive, models.ResellerDomainVerificationVerified).
+		Joins("JOIN reseller_profiles ON reseller_profiles.id = reseller_domains.reseller_id AND reseller_profiles.deleted_at IS NULL").
+		Where("reseller_domains.domain = ? AND reseller_domains.status = ? AND reseller_domains.verification_status = ?", domain, models.ResellerDomainStatusActive, models.ResellerDomainVerificationVerified).
+		Where("reseller_profiles.status = ?", models.ResellerProfileStatusActive).
 		First(&row).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -683,9 +686,18 @@ func (r *GormResellerRepository) GetOrderSnapshotByResellerOrderNo(resellerID ui
 
 func (r *GormResellerRepository) buildResellerOrderSnapshotRows(resellerID uint, snapshots []models.ResellerOrderSnapshot) ([]ResellerOrderSnapshotRow, error) {
 	orderIDs := make([]uint, 0, len(snapshots))
+	buyerUserIDs := make([]uint, 0, len(snapshots))
+	buyerSeen := map[uint]struct{}{}
 	for i := range snapshots {
 		if snapshots[i].OrderID > 0 {
 			orderIDs = append(orderIDs, snapshots[i].OrderID)
+		}
+		buyerUserID := snapshots[i].Order.UserID
+		if buyerUserID > 0 {
+			if _, ok := buyerSeen[buyerUserID]; !ok {
+				buyerSeen[buyerUserID] = struct{}{}
+				buyerUserIDs = append(buyerUserIDs, buyerUserID)
+			}
 		}
 	}
 	ledgerByOrderID := map[uint][]models.ResellerLedgerEntry{}
@@ -703,6 +715,16 @@ func (r *GormResellerRepository) buildResellerOrderSnapshotRows(resellerID uint,
 			ledgerByOrderID[*ledgerRows[i].OrderID] = append(ledgerByOrderID[*ledgerRows[i].OrderID], ledgerRows[i])
 		}
 	}
+	buyerEmailByID := map[uint]string{}
+	if len(buyerUserIDs) > 0 {
+		var users []models.User
+		if err := r.db.Select("id", "email").Where("id IN ?", buyerUserIDs).Find(&users).Error; err != nil {
+			return nil, err
+		}
+		for i := range users {
+			buyerEmailByID[users[i].ID] = users[i].Email
+		}
+	}
 	out := make([]ResellerOrderSnapshotRow, 0, len(snapshots))
 	for i := range snapshots {
 		items := resellerOrderItemsFromParentOrChildren(snapshots[i].Order)
@@ -711,6 +733,7 @@ func (r *GormResellerRepository) buildResellerOrderSnapshotRows(resellerID uint,
 			Order:         snapshots[i].Order,
 			Items:         items,
 			LedgerEntries: ledgerByOrderID[snapshots[i].OrderID],
+			BuyerEmail:    buyerEmailByID[snapshots[i].Order.UserID],
 		})
 	}
 	return out, nil
@@ -845,6 +868,23 @@ func (r *GormResellerRepository) SumLedgerAmount(resellerID uint, currency strin
 	var total decimal.Decimal
 	err := r.db.Model(&models.ResellerLedgerEntry{}).
 		Where("reseller_id = ? AND currency = ? AND status IN ?", resellerID, currency, statuses).
+		Select("COALESCE(SUM(amount), 0)").
+		Scan(&total).Error
+	if err != nil {
+		return decimal.Zero, err
+	}
+	return total.Round(2), nil
+}
+
+// SumLedgerAmountByOrderAndType 汇总指定订单、指定类型的流水金额（含正负号），用于退款扣减的累计上限保护。
+func (r *GormResellerRepository) SumLedgerAmountByOrderAndType(orderID uint, ledgerType string) (decimal.Decimal, error) {
+	ledgerType = strings.TrimSpace(ledgerType)
+	if orderID == 0 || ledgerType == "" {
+		return decimal.Zero, nil
+	}
+	var total decimal.Decimal
+	err := r.db.Model(&models.ResellerLedgerEntry{}).
+		Where("order_id = ? AND type = ?", orderID, ledgerType).
 		Select("COALESCE(SUM(amount), 0)").
 		Scan(&total).Error
 	if err != nil {

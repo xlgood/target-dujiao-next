@@ -17,6 +17,7 @@ type ResellerProductSettingRepository interface {
 	UpsertSetting(setting models.ResellerProductSetting) (*models.ResellerProductSetting, error)
 	DeleteSetting(resellerID, productID, skuID uint) error
 	ListAdminSettings(filter ResellerProductSettingAdminListFilter) ([]models.ResellerProductSetting, int64, error)
+	SummarizeByResellerID(resellerID uint) (ResellerProductSettingSummary, error)
 }
 
 type GormResellerProductSettingRepository struct {
@@ -60,6 +61,13 @@ type ResellerProductSettingAdminListFilter struct {
 type ResellerProductSettingProductRow struct {
 	Product  models.Product
 	Settings []models.ResellerProductSetting
+}
+
+type ResellerProductSettingSummary struct {
+	ConfiguredProducts int64
+	HiddenProducts     int64
+	SKUOverrides       int64
+	PricingOverrides   int64
 }
 
 func (r *GormResellerProductSettingRepository) ListProductsWithSettings(filter ResellerProductSettingListFilter) ([]ResellerProductSettingProductRow, int64, error) {
@@ -259,4 +267,25 @@ func (r *GormResellerProductSettingRepository) ListAdminSettings(filter Reseller
 		return nil, 0, err
 	}
 	return rows, total, nil
+}
+
+func (r *GormResellerProductSettingRepository) SummarizeByResellerID(resellerID uint) (ResellerProductSettingSummary, error) {
+	var summary ResellerProductSettingSummary
+	if resellerID == 0 {
+		return summary, nil
+	}
+	scope := r.db.Model(&models.ResellerProductSetting{}).Where("reseller_id = ?", resellerID)
+	if err := scope.Session(&gorm.Session{}).Distinct("product_id").Count(&summary.ConfiguredProducts).Error; err != nil {
+		return summary, err
+	}
+	if err := scope.Session(&gorm.Session{}).Where("is_listed = ?", false).Distinct("product_id").Count(&summary.HiddenProducts).Error; err != nil {
+		return summary, err
+	}
+	if err := scope.Session(&gorm.Session{}).Where("sku_id > 0").Count(&summary.SKUOverrides).Error; err != nil {
+		return summary, err
+	}
+	if err := scope.Session(&gorm.Session{}).Where("pricing_mode <> ?", models.ResellerPricingModeInherit).Count(&summary.PricingOverrides).Error; err != nil {
+		return summary, err
+	}
+	return summary, nil
 }

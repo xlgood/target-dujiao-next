@@ -463,18 +463,38 @@ func (s *ResellerAccountingService) HandleRefundDeductTx(tx *gorm.DB, order *mod
 	if orderAmount.LessThanOrEqual(decimal.Zero) {
 		return ErrResellerLedgerInvalidSnapshot
 	}
-	remainingBefore := orderAmount.Sub(refundedBefore.Round(2)).Round(2)
+	refundedBefore = refundedBefore.Round(2)
+	remainingBefore := orderAmount.Sub(refundedBefore).Round(2)
 	if remainingBefore.LessThanOrEqual(decimal.Zero) {
 		return nil
 	}
+	// 本次退款金额不得超过剩余可退金额。
 	if refundAmount.GreaterThan(remainingBefore) {
 		refundAmount = remainingBefore
 	}
-	ratio := refundAmount.Div(remainingBefore)
+	// 该订单此前已扣减的利润总额（refund_deduct 流水金额为负，取绝对值）。
+	deductedSoFar, err := repoTx.SumLedgerAmountByOrderAndType(order.ID, models.ResellerLedgerTypeRefundDeduct)
+	if err != nil {
+		return err
+	}
+	remainingProfit := profit.Sub(deductedSoFar.Abs().Round(2)).Round(2)
+	if remainingProfit.LessThanOrEqual(decimal.Zero) {
+		return nil
+	}
+	// 扣减比例以「订单总额」为固定分母，避免多次部分退款时按递减的剩余额累计超扣。
+	ratio := refundAmount.Div(orderAmount)
 	deduct := profit.Mul(ratio).Round(2)
+	// 退款累计已达全额、或受逐次取整影响时，扣减额收敛到剩余未扣利润，
+	// 确保多次部分退款的累计扣减恰好等于原始利润、绝不超扣。
+	fullyRefunded := refundedBefore.Add(refundAmount).GreaterThanOrEqual(orderAmount)
+	if fullyRefunded || deduct.GreaterThan(remainingProfit) {
+		deduct = remainingProfit
+	}
 	if deduct.LessThanOrEqual(decimal.Zero) {
 		return nil
 	}
+	// item 级分摊按本次实际扣减占总利润的比例计算，保证明细之和与扣减总额一致。
+	allocRatio := deduct.Div(profit)
 	allocation := resellerRefundAllocation{
 		RefundRecordID: refundRecord.ID,
 		OrderID:        order.ID,
@@ -489,7 +509,7 @@ func (s *ResellerAccountingService) HandleRefundDeductTx(tx *gorm.DB, order *mod
 				continue
 			}
 			itemProfit := decimalFromSnapshotValue(itemMap["profit_amount"])
-			itemDeduct := itemProfit.Mul(ratio).Round(2)
+			itemDeduct := itemProfit.Mul(allocRatio).Round(2)
 			if itemDeduct.LessThanOrEqual(decimal.Zero) {
 				continue
 			}
@@ -609,6 +629,15 @@ func (s *ResellerAccountingService) ApplyWithdraw(resellerID uint, input Reselle
 			balance.Status == models.ResellerBalanceStatusDisabled {
 			return ErrResellerBalanceAccountFrozen
 		}
+		// 可提现额必须以「净可用余额」为准（含退款扣减等负数流水），
+		// 防止仅凭正数流水之和超额提现，导致账户被提成负余额、造成平台资损。
+		availableSums, err := repoTx.SumLedgerAmountGroupedByStatus(resellerID, currency, []string{models.ResellerLedgerStatusAvailable})
+		if err != nil {
+			return err
+		}
+		if amount.GreaterThan(availableSums[models.ResellerLedgerStatusAvailable].Round(2)) {
+			return ErrResellerWithdrawInsufficient
+		}
 		ledgers, err := repoTx.ListAvailableLedgerEntriesForUpdate(resellerID, currency)
 		if err != nil {
 			return err
@@ -642,7 +671,7 @@ func (s *ResellerAccountingService) ApplyWithdraw(resellerID uint, input Reselle
 			remainRow.Amount = models.NewMoneyFromDecimal(remainAmount)
 			remainRow.Status = models.ResellerLedgerStatusAvailable
 			remainRow.WithdrawRequestID = nil
-			remainRow.IdempotencyKey = fmt.Sprintf("%s:split:%d:%d", row.IdempotencyKey, row.ID, now.UnixNano())
+			remainRow.IdempotencyKey = fmt.Sprintf("split:%d:%d", row.ID, now.UnixNano())
 			remainRow.CreatedAt = now
 			remainRow.UpdatedAt = now
 			if _, err := repoTx.CreateLedgerEntryIfNotExists(&remainRow); err != nil {

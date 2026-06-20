@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/dujiao-next/internal/service"
@@ -113,5 +114,54 @@ func TestResellerTenantMiddlewareOnlyBlocksStorefrontGroup(t *testing.T) {
 		if w.Code != tc.want {
 			t.Fatalf("%s %s status=%d want %d body=%s", tc.method, tc.path, w.Code, tc.want, w.Body.String())
 		}
+	}
+}
+
+func TestRequireMainTenantForResellerConsoleBlocksResellerTenant(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	resellerID := uint(9)
+	r := gin.New()
+	r.Use(func(c *gin.Context) {
+		tenant := service.ResellerTenantContext("shop.example.test", resellerID, 100, "shop.example.test")
+		c.Request = c.Request.WithContext(service.WithTenantContext(c.Request.Context(), tenant))
+		c.Next()
+	})
+	r.GET("/api/v1/user/reseller/profile", RequireMainTenantForResellerConsole(), func(c *gin.Context) {
+		c.String(http.StatusOK, "should not run")
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/user/reseller/profile", nil)
+	req.Host = "shop.example.test"
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), `"status_code":403`) {
+		t.Fatalf("expected forbidden response, body=%s", w.Body.String())
+	}
+	if strings.Contains(w.Body.String(), "should not run") {
+		t.Fatalf("handler should not run on reseller tenant, body=%s", w.Body.String())
+	}
+}
+
+func TestRequireMainTenantForResellerConsoleAllowsMainTenant(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.Use(func(c *gin.Context) {
+		tenant := service.MainTenantContext("main.example.test")
+		c.Request = c.Request.WithContext(service.WithTenantContext(c.Request.Context(), tenant))
+		c.Next()
+	})
+	r.GET("/api/v1/user/reseller/profile", RequireMainTenantForResellerConsole(), func(c *gin.Context) {
+		c.String(http.StatusOK, "ok")
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/user/reseller/profile", nil)
+	req.Host = "main.example.test"
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK || w.Body.String() != "ok" {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
 	}
 }

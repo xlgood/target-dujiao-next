@@ -757,3 +757,91 @@ func TestNewResellerAccountingServiceClampsConfirmDays(t *testing.T) {
 		t.Fatalf("expected over-max confirm days clamped to 3650, got %d", svc.confirmDays)
 	}
 }
+
+// TestResellerAccountingRefundDeductDoesNotOverDeductAcrossPartialRefunds 验证多次部分退款的
+// 累计利润扣减恰好等于原始利润、不会超扣（修复前按递减剩余额累计会扣成 42）。
+func TestResellerAccountingRefundDeductDoesNotOverDeductAcrossPartialRefunds(t *testing.T) {
+	db := openResellerAccountingServiceTestDB(t)
+	order, payment, _ := seedPaidResellerOrderSnapshot(t, db, true)
+	repo := repository.NewResellerRepository(db)
+	svc := NewResellerAccountingService(repo, ResellerAccountingOptions{ConfirmDays: 0})
+	if err := repo.Transaction(func(tx *gorm.DB) error {
+		return svc.PostOrderProfitTx(tx, &order, &payment)
+	}); err != nil {
+		t.Fatalf("post profit failed: %v", err)
+	}
+
+	// 第一次部分退款 52/130，扣减利润 30 * 0.4 = 12。
+	refund1 := models.OrderRefundRecord{UserID: order.UserID, OrderID: order.ID, Type: constants.OrderRefundTypeManual, Amount: models.NewMoneyFromDecimal(decimal.NewFromInt(52)), Currency: "USD"}
+	if err := db.Create(&refund1).Error; err != nil {
+		t.Fatalf("create refund1 failed: %v", err)
+	}
+	if err := repo.Transaction(func(tx *gorm.DB) error {
+		return svc.HandleRefundDeductTx(tx, &order, &refund1, decimal.Zero)
+	}); err != nil {
+		t.Fatalf("refund deduct 1 failed: %v", err)
+	}
+
+	// 第二次退款 78（剩余全部），refundedBefore=52，订单转为全额退款。
+	refund2 := models.OrderRefundRecord{UserID: order.UserID, OrderID: order.ID, Type: constants.OrderRefundTypeManual, Amount: models.NewMoneyFromDecimal(decimal.NewFromInt(78)), Currency: "USD"}
+	if err := db.Create(&refund2).Error; err != nil {
+		t.Fatalf("create refund2 failed: %v", err)
+	}
+	if err := repo.Transaction(func(tx *gorm.DB) error {
+		return svc.HandleRefundDeductTx(tx, &order, &refund2, decimal.NewFromInt(52))
+	}); err != nil {
+		t.Fatalf("refund deduct 2 failed: %v", err)
+	}
+
+	totalDeduct, err := repo.SumLedgerAmountByOrderAndType(order.ID, models.ResellerLedgerTypeRefundDeduct)
+	if err != nil {
+		t.Fatalf("sum deduct failed: %v", err)
+	}
+	if totalDeduct.StringFixed(2) != "-30.00" {
+		t.Fatalf("expected cumulative deduct -30.00 (== original profit), got %s", totalDeduct.StringFixed(2))
+	}
+}
+
+// TestResellerAccountingApplyWithdrawRejectsExceedingNetAvailable 验证提现额以「净可用余额」为准，
+// 当 available 含退款扣减负数流水时，不能仅凭正数流水之和超额提现。
+func TestResellerAccountingApplyWithdrawRejectsExceedingNetAvailable(t *testing.T) {
+	db := openResellerAccountingServiceTestDB(t)
+	profile := seedResellerAccountingProfile(t, db)
+	now := time.Now()
+	if err := db.Create(&models.ResellerLedgerEntry{
+		ResellerID: profile.ID, Type: models.ResellerLedgerTypeOrderProfit,
+		Amount: models.NewMoneyFromDecimal(decimal.NewFromInt(100)), Currency: "USD",
+		IdempotencyKey: "test_profit_net", Status: models.ResellerLedgerStatusAvailable,
+		CreatedAt: now, UpdatedAt: now,
+	}).Error; err != nil {
+		t.Fatalf("create profit ledger failed: %v", err)
+	}
+	if err := db.Create(&models.ResellerLedgerEntry{
+		ResellerID: profile.ID, Type: models.ResellerLedgerTypeRefundDeduct,
+		Amount: models.NewMoneyFromDecimal(decimal.NewFromInt(-50)), Currency: "USD",
+		IdempotencyKey: "test_refund_net", Status: models.ResellerLedgerStatusAvailable,
+		CreatedAt: now, UpdatedAt: now,
+	}).Error; err != nil {
+		t.Fatalf("create refund ledger failed: %v", err)
+	}
+	repo := repository.NewResellerRepository(db)
+	svc := NewResellerAccountingService(repo, ResellerAccountingOptions{})
+
+	// 净可用 = 100 - 50 = 50，提现 80 必须被拒绝（旧逻辑仅看正数 100 会放行造成资损）。
+	if _, err := svc.ApplyWithdraw(profile.ID, ResellerWithdrawApplyInput{
+		Amount: decimal.NewFromInt(80), Currency: "USD", Channel: "usdt", Account: "Txxx",
+	}); !errors.Is(err, ErrResellerWithdrawInsufficient) {
+		t.Fatalf("expected ErrResellerWithdrawInsufficient for over-net withdraw, got %v", err)
+	}
+
+	// 提现 50（恰好等于净可用）应成功。
+	req, err := svc.ApplyWithdraw(profile.ID, ResellerWithdrawApplyInput{
+		Amount: decimal.NewFromInt(50), Currency: "USD", Channel: "usdt", Account: "Txxx",
+	})
+	if err != nil {
+		t.Fatalf("expected withdraw of net available 50 to succeed, got %v", err)
+	}
+	if req == nil || req.Amount.Decimal.StringFixed(2) != "50.00" {
+		t.Fatalf("unexpected withdraw request: %+v", req)
+	}
+}

@@ -69,7 +69,7 @@ func (r *ResellerDomainResolver) ResolveHost(ctx context.Context, rawHost string
 	if err != nil {
 		return TenantContext{}, err
 	}
-	if domain == nil || domain.Profile == nil {
+	if domain == nil || domain.Profile == nil || domain.Profile.Status != models.ResellerProfileStatusActive {
 		_ = cache.SetResellerDomainNotFound(ctx, host)
 		return UnavailableTenantContext(host, ResellerDomainUnavailableNotFound), nil
 	}

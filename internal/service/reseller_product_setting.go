@@ -59,6 +59,8 @@ type ResellerProductSettingAdminListInput struct {
 	Listed      string
 }
 
+type ResellerProductSettingSummary = repository.ResellerProductSettingSummary
+
 type ResellerProductSettingDetail struct {
 	Profile          *models.ResellerProfile
 	Product          models.Product
@@ -135,6 +137,13 @@ func (s *ResellerProductSettingService) ListAdminSettings(input ResellerProductS
 		Configured:  input.Configured,
 		Listed:      input.Listed,
 	})
+}
+
+func (s *ResellerProductSettingService) SummarizeAdminSettings(resellerID uint) (ResellerProductSettingSummary, error) {
+	if s == nil || s.settingRepo == nil || resellerID == 0 {
+		return ResellerProductSettingSummary{}, nil
+	}
+	return s.settingRepo.SummarizeByResellerID(resellerID)
 }
 
 func (s *ResellerProductSettingService) GetAdminProductSetting(resellerID, productID uint) (*ResellerProductSettingDetail, error) {

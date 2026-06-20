@@ -26,8 +26,6 @@ type ResellerOrderListInput struct {
 	PageSize    int
 	Status      string
 	OrderNo     string
-	Domain      string
-	Currency    string
 	CreatedFrom *time.Time
 	CreatedTo   *time.Time
 	PaidFrom    *time.Time
@@ -118,6 +116,28 @@ func (s *ResellerOrderService) ListUserOrders(userID uint, input ResellerOrderLi
 	return out, total, nil
 }
 
+func (s *ResellerOrderService) ListAdminOrders(resellerID uint, input ResellerOrderListInput) ([]ResellerOrderListItem, int64, error) {
+	if s == nil || s.repo == nil || resellerID == 0 {
+		return nil, 0, ErrNotFound
+	}
+	profile, err := s.repo.GetProfileByID(resellerID)
+	if err != nil {
+		return nil, 0, err
+	}
+	if profile == nil {
+		return nil, 0, ErrNotFound
+	}
+	rows, total, err := s.repo.ListOrderSnapshotsByReseller(resellerOrderFilter(resellerID, input))
+	if err != nil {
+		return nil, 0, err
+	}
+	out := make([]ResellerOrderListItem, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, buildResellerOrderListItem(row))
+	}
+	return out, total, nil
+}
+
 func (s *ResellerOrderService) GetUserOrderDetail(userID uint, orderNo string) (*ResellerOrderDetail, error) {
 	profile, err := s.requireActiveProfileByUser(userID)
 	if err != nil {
@@ -154,8 +174,6 @@ func resellerOrderFilter(resellerID uint, input ResellerOrderListInput) reposito
 		PageSize:    input.PageSize,
 		Status:      strings.TrimSpace(input.Status),
 		OrderNo:     strings.TrimSpace(input.OrderNo),
-		Domain:      strings.TrimSpace(input.Domain),
-		Currency:    strings.TrimSpace(input.Currency),
 		CreatedFrom: input.CreatedFrom,
 		CreatedTo:   input.CreatedTo,
 		PaidFrom:    input.PaidFrom,
@@ -175,7 +193,7 @@ func buildResellerOrderListItem(row repository.ResellerOrderSnapshotRow) Reselle
 		ProfitAmount: snapshot.ProfitAmount,
 		ProfitStatus: neutralResellerProfitStatus(snapshot, order, row.LedgerEntries),
 		Domain:       snapshot.Domain,
-		BuyerLabel:   maskResellerBuyerLabel(order),
+		BuyerLabel:   maskResellerBuyerLabel(order, row.BuyerEmail),
 		ItemsCount:   len(row.Items),
 		CreatedAt:    order.CreatedAt,
 		PaidAt:       order.PaidAt,
@@ -209,17 +227,27 @@ func neutralResellerProfitStatus(snapshot models.ResellerOrderSnapshot, order mo
 	return ResellerProfitStatusPending
 }
 
-func maskResellerBuyerLabel(order models.Order) string {
+func maskResellerBuyerLabel(order models.Order, buyerEmail string) string {
 	if order.UserID > 0 {
-		return "user"
+		if label := maskResellerBuyerEmail(buyerEmail); label != "" {
+			return label
+		}
+		return fmt.Sprintf("user#%d", order.UserID)
 	}
-	email := strings.TrimSpace(order.GuestEmail)
+	if label := maskResellerBuyerEmail(order.GuestEmail); label != "" {
+		return label
+	}
+	return "guest"
+}
+
+func maskResellerBuyerEmail(email string) string {
+	email = strings.TrimSpace(email)
 	if email == "" {
-		return "guest"
+		return ""
 	}
 	parts := strings.SplitN(email, "@", 2)
 	if len(parts) != 2 {
-		return "guest"
+		return ""
 	}
 	prefix := parts[0]
 	if len(prefix) > 1 {

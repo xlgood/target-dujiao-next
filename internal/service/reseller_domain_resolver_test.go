@@ -75,6 +75,25 @@ func TestResellerDomainResolverActiveDomain(t *testing.T) {
 	}
 }
 
+func TestResellerDomainResolverInactiveProfileUnavailable(t *testing.T) {
+	id := uint(7)
+	repo := &resellerResolverRepoStub{domain: &models.ResellerDomain{
+		ID:         11,
+		ResellerID: id,
+		Domain:     "shop.example.test",
+		Status:     models.ResellerDomainStatusActive,
+		Profile:    &models.ResellerProfile{ID: id, UserID: 88, Status: models.ResellerProfileStatusDisabled},
+	}}
+	resolver := NewResellerDomainResolver(repo, config.ResellerConfig{Enabled: true, MainHosts: []string{"main.example.test"}})
+	tenant, err := resolver.ResolveHost(context.Background(), "shop.example.test")
+	if err != nil {
+		t.Fatalf("resolve disabled profile host failed: %v", err)
+	}
+	if !tenant.Unavailable || tenant.ResellerID != nil {
+		t.Fatalf("expected disabled profile to be unavailable, got %+v", tenant)
+	}
+}
+
 func TestResellerDomainResolverRequestUsesTrustedForwardedHost(t *testing.T) {
 	id := uint(8)
 	repo := &resellerResolverRepoStub{domain: &models.ResellerDomain{

@@ -176,6 +176,10 @@ func (r *resellerPricingRepoStub) SumLedgerAmount(resellerID uint, currency stri
 	return decimal.Zero, nil
 }
 
+func (r *resellerPricingRepoStub) SumLedgerAmountByOrderAndType(orderID uint, ledgerType string) (decimal.Decimal, error) {
+	return decimal.Zero, nil
+}
+
 func (r *resellerPricingRepoStub) SumLedgerAmountGroupedByStatus(resellerID uint, currency string, statuses []string) (map[string]decimal.Decimal, error) {
 	return map[string]decimal.Decimal{}, nil
 }

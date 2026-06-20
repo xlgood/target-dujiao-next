@@ -519,6 +519,10 @@ func (r *resellerPricingRepoForPublicTest) SumLedgerAmount(resellerID uint, curr
 	return decimal.Zero, nil
 }
 
+func (r *resellerPricingRepoForPublicTest) SumLedgerAmountByOrderAndType(orderID uint, ledgerType string) (decimal.Decimal, error) {
+	return decimal.Zero, nil
+}
+
 func (r *resellerPricingRepoForPublicTest) SumLedgerAmountGroupedByStatus(resellerID uint, currency string, statuses []string) (map[string]decimal.Decimal, error) {
 	return map[string]decimal.Decimal{}, nil
 }

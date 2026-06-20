@@ -154,7 +154,7 @@ reseller:
   # 只有反向代理可信并正确传递 Host 时才开启。
   # false 时使用原始 Host；true 时优先使用 X-Forwarded-Host。
   trusted_forwarded_host: false
-  # 系统分配二级域名的基础域名。审核通过后会生成 r{reseller_id}.{subdomain_base}。
+  # 管理员为分销商分配系统二级域名时使用的基础域名，例如 hello.{subdomain_base}。
   # 生产启用前请配置为已经做好 wildcard DNS/TLS 的域名，例如 shop.example.com。
   subdomain_base: ""
   # 是否允许普通用户在个人中心自助提交分销商申请。

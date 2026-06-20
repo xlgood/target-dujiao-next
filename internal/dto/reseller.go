@@ -98,7 +98,6 @@ type ResellerSiteConfigResp struct {
 	SEO          models.JSON   `json:"seo"`
 	FooterLinks  []interface{} `json:"footer_links"`
 	NavConfig    models.JSON   `json:"nav_config"`
-	Theme        models.JSON   `json:"theme"`
 	UpdatedAt    time.Time     `json:"updated_at"`
 }
 
@@ -133,7 +132,6 @@ type AdminResellerSiteConfigResp struct {
 	SEO          models.JSON                       `json:"seo"`
 	FooterLinks  []interface{}                     `json:"footer_links"`
 	NavConfig    models.JSON                       `json:"nav_config"`
-	Theme        models.JSON                       `json:"theme"`
 	Profile      *ResellerSiteConfigProfileRefResp `json:"profile,omitempty"`
 	CreatedAt    time.Time                         `json:"created_at"`
 	UpdatedAt    time.Time                         `json:"updated_at"`
@@ -306,7 +304,6 @@ func NewResellerSiteConfigResp(row *models.ResellerSiteConfig) *ResellerSiteConf
 		SEO:          row.SEOJSON,
 		FooterLinks:  resellerFooterLinksFromEnvelope(row.FooterLinksJSON),
 		NavConfig:    row.NavConfigJSON,
-		Theme:        row.ThemeJSON,
 		UpdatedAt:    row.UpdatedAt,
 	}
 }
@@ -367,7 +364,6 @@ func NewAdminResellerSiteConfigResp(row *models.ResellerSiteConfig) AdminReselle
 		SEO:          row.SEOJSON,
 		FooterLinks:  resellerFooterLinksFromEnvelope(row.FooterLinksJSON),
 		NavConfig:    row.NavConfigJSON,
-		Theme:        row.ThemeJSON,
 		Profile:      profile,
 		CreatedAt:    row.CreatedAt,
 		UpdatedAt:    row.UpdatedAt,

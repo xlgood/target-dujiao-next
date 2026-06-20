@@ -22,7 +22,6 @@ type AdminResellerSiteConfigRequest struct {
 	SEO          service.ResellerSEOInput          `json:"seo"`
 	FooterLinks  []service.ResellerFooterLinkInput `json:"footer_links"`
 	NavConfig    service.ResellerNavConfigInput    `json:"nav_config"`
-	Theme        service.ResellerThemeInput        `json:"theme"`
 }
 
 func (req AdminResellerSiteConfigRequest) toServiceInput() service.ResellerSiteConfigInput {
@@ -35,7 +34,6 @@ func (req AdminResellerSiteConfigRequest) toServiceInput() service.ResellerSiteC
 		SEO:          req.SEO,
 		FooterLinks:  req.FooterLinks,
 		NavConfig:    req.NavConfig,
-		Theme:        req.Theme,
 	}
 }
 
@@ -129,7 +127,7 @@ func (h *Handler) UpdateResellerSiteConfig(c *gin.Context) {
 			"reseller_id":    resellerID,
 			"config_id":      row.ID,
 			"site_name":      row.SiteName,
-			"changed_fields": []string{"site_name", "logo", "favicon", "announcement", "support", "seo", "footer_links", "nav_config", "theme"},
+			"changed_fields": []string{"site_name", "logo", "favicon", "announcement", "support", "seo", "footer_links", "nav_config"},
 			"source":         "admin",
 		},
 	})

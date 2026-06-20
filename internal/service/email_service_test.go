@@ -324,7 +324,7 @@ func TestLoginAuthRejectsInsecureRemoteConnection(t *testing.T) {
 func TestSMTPServerAuthExtensions(t *testing.T) {
 	host := strings.TrimSpace(os.Getenv("TEST_SMTP_HOST"))
 	if host == "" {
-		host = "smtp.office365.com"
+		t.Skip("set TEST_SMTP_HOST to check SMTP server AUTH extensions")
 	}
 
 	port := 587

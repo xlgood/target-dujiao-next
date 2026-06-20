@@ -4,6 +4,8 @@ import (
 	"context"
 	"net/http"
 
+	"github.com/dujiao-next/internal/http/response"
+	"github.com/dujiao-next/internal/i18n"
 	"github.com/dujiao-next/internal/service"
 	"github.com/gin-gonic/gin"
 )
@@ -30,6 +32,19 @@ func ResellerTenantMiddleware(resolver ResellerTenantResolver) gin.HandlerFunc {
 		ctx := service.WithTenantContext(c.Request.Context(), tenant)
 		c.Request = c.Request.WithContext(ctx)
 		c.Set("tenant", tenant)
+		c.Next()
+	}
+}
+
+func RequireMainTenantForResellerConsole() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		tenant, ok := service.TenantFromContext(c.Request.Context())
+		if ok && tenant.ResellerID != nil && !tenant.IsMain && !tenant.Unavailable {
+			msg := i18n.T(i18n.ResolveLocale(c), "error.forbidden")
+			response.Forbidden(c, msg)
+			c.Abort()
+			return
+		}
 		c.Next()
 	}
 }

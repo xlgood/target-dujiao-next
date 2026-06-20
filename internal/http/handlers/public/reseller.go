@@ -94,7 +94,6 @@ type ResellerSiteConfigRequest struct {
 	SEO          service.ResellerSEOInput          `json:"seo"`
 	FooterLinks  []service.ResellerFooterLinkInput `json:"footer_links"`
 	NavConfig    service.ResellerNavConfigInput    `json:"nav_config"`
-	Theme        service.ResellerThemeInput        `json:"theme"`
 }
 
 type ResellerProductSettingRequest struct {
@@ -121,7 +120,6 @@ func (req ResellerSiteConfigRequest) toServiceInput() service.ResellerSiteConfig
 		SEO:          req.SEO,
 		FooterLinks:  req.FooterLinks,
 		NavConfig:    req.NavConfig,
-		Theme:        req.Theme,
 	}
 }
 
@@ -538,8 +536,6 @@ func resellerOrderListInputFromQuery(c *gin.Context, page, pageSize int) (servic
 		PageSize:    pageSize,
 		Status:      strings.TrimSpace(c.Query("status")),
 		OrderNo:     strings.TrimSpace(c.Query("order_no")),
-		Domain:      strings.TrimSpace(c.Query("domain")),
-		Currency:    strings.TrimSpace(c.Query("currency")),
 		CreatedFrom: createdFrom,
 		CreatedTo:   createdTo,
 		PaidFrom:    paidFrom,
@@ -630,7 +626,6 @@ func (h *Handler) ListResellerBalanceAccounts(c *gin.Context) {
 	rows, total, err := h.ResellerAccountingService.ListUserBalanceAccounts(uid, service.ResellerUserBalanceAccountListFilter{
 		Page:     page,
 		PageSize: pageSize,
-		Currency: strings.TrimSpace(c.Query("currency")),
 		Status:   strings.TrimSpace(c.Query("status")),
 	})
 	if err != nil {
@@ -659,7 +654,6 @@ func (h *Handler) ListResellerLedgerEntries(c *gin.Context) {
 	rows, total, err := h.ResellerAccountingService.ListUserLedgerEntries(uid, service.ResellerUserLedgerListFilter{
 		Page:     page,
 		PageSize: pageSize,
-		Currency: strings.TrimSpace(c.Query("currency")),
 		Type:     strings.TrimSpace(c.Query("type")),
 		Status:   strings.TrimSpace(c.Query("status")),
 		OrderID:  orderID,
@@ -685,7 +679,6 @@ func (h *Handler) ListResellerWithdraws(c *gin.Context) {
 	rows, total, err := h.ResellerAccountingService.ListUserWithdrawRequests(uid, service.ResellerUserWithdrawListFilter{
 		Page:     page,
 		PageSize: pageSize,
-		Currency: strings.TrimSpace(c.Query("currency")),
 		Status:   strings.TrimSpace(c.Query("status")),
 	})
 	if err != nil {
