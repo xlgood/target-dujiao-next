@@ -1,7 +1,12 @@
 package stripe
 
 import (
+	"context"
 	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"testing"
 	"time"
 
@@ -27,6 +32,60 @@ func TestParseAndValidateConfig(t *testing.T) {
 	}
 	if err := ValidateConfig(cfg); err != nil {
 		t.Fatalf("validate config failed: %v", err)
+	}
+}
+
+func TestCreatePaymentWeChatPayClientOption(t *testing.T) {
+	tests := []struct {
+		name               string
+		paymentMethodTypes []interface{}
+		expectClientOption bool
+	}{
+		{name: "WeChatPayWithCard", paymentMethodTypes: []interface{}{"card", "wechat_pay"}, expectClientOption: true},
+		{name: "CardOnly", paymentMethodTypes: []interface{}{"card"}, expectClientOption: false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var form url.Values
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				body, _ := io.ReadAll(r.Body)
+				form, _ = url.ParseQuery(string(body))
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"id":"cs_test_123","url":"https://checkout.stripe.com/c/pay/cs_test_123","status":"open"}`))
+			}))
+			defer server.Close()
+
+			cfg, err := ParseConfig(map[string]interface{}{
+				"secret_key":           "sk_test_123",
+				"webhook_secret":       "whsec_123",
+				"success_url":          "https://example.com/payment?stripe_return=1",
+				"cancel_url":           "https://example.com/payment?stripe_cancel=1",
+				"api_base_url":         server.URL,
+				"payment_method_types": tc.paymentMethodTypes,
+			})
+			if err != nil {
+				t.Fatalf("parse config failed: %v", err)
+			}
+
+			result, err := CreatePayment(context.Background(), cfg, CreateInput{
+				OrderNo:  "ORDER-1001",
+				Amount:   "12.88",
+				Currency: "CNY",
+			})
+			if err != nil {
+				t.Fatalf("create payment failed: %v", err)
+			}
+			if result.SessionID != "cs_test_123" {
+				t.Fatalf("unexpected session id: %s", result.SessionID)
+			}
+			clientOption := form.Get("payment_method_options[wechat_pay][client]")
+			if tc.expectClientOption && clientOption != "web" {
+				t.Fatalf("expected wechat_pay client option web, got %q, form: %v", clientOption, form)
+			}
+			if !tc.expectClientOption && clientOption != "" {
+				t.Fatalf("unexpected wechat_pay client option: %q", clientOption)
+			}
+		})
 	}
 }
 

@@ -224,6 +224,10 @@ func CreatePayment(ctx context.Context, cfg *Config, input CreateInput) (*Create
 	form.Set("payment_intent_data[metadata][order_no]", orderNo)
 	for _, pmType := range cfg.PaymentMethodTypes {
 		form.Add("payment_method_types[]", pmType)
+		// Stripe 要求 Web Checkout 场景下 WeChat Pay 必须显式声明 client，否则返回 400。
+		if pmType == "wechat_pay" {
+			form.Set("payment_method_options[wechat_pay][client]", "web")
+		}
 	}
 
 	respBody, statusCode, err := doFormRequest(ctx, cfg, http.MethodPost, "/v1/checkout/sessions", form)
