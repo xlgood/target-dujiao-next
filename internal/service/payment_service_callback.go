@@ -536,7 +536,7 @@ func (s *PaymentService) enqueueOrderPaidAsync(order *models.Order, payment *mod
 	}
 	if len(order.Children) > 0 {
 		for _, child := range order.Children {
-			if child.Status == constants.OrderStatusFulfilling {
+			if child.Status == constants.OrderStatusFulfilling && hasManualFulfillmentItems(&child) {
 				s.enqueueManualFulfillmentPendingAsync(&child, order, log)
 			}
 			if shouldAutoFulfill(&child) {
@@ -558,7 +558,7 @@ func (s *PaymentService) enqueueOrderPaidAsync(order *models.Order, payment *mod
 		s.enqueueDownstreamCallbackAsync(order, log)
 		return
 	}
-	if order.Status == constants.OrderStatusFulfilling {
+	if order.Status == constants.OrderStatusFulfilling && hasManualFulfillmentItems(order) {
 		s.enqueueManualFulfillmentPendingAsync(order, nil, log)
 	}
 	if shouldAutoFulfill(order) {
@@ -704,6 +704,20 @@ func (s *PaymentService) enqueueWalletRechargeBotNotifyAsync(recharge *models.Wa
 			"error", err,
 		)
 	}
+}
+
+// hasManualFulfillmentItems 判断订单是否包含需要人工交付的商品项。
+// upstream 类型由采购流程自动交付，不触发待人工交付提醒。
+func hasManualFulfillmentItems(order *models.Order) bool {
+	if order == nil {
+		return false
+	}
+	for _, item := range order.Items {
+		if normalizeNotificationFulfillmentType(item.FulfillmentType) == constants.FulfillmentTypeManual {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *PaymentService) enqueueManualFulfillmentPendingAsync(order *models.Order, parent *models.Order, log *zap.SugaredLogger) {

@@ -30,6 +30,35 @@ func TestShouldMarkFulfilling(t *testing.T) {
 	}
 }
 
+func TestHasManualFulfillmentItems(t *testing.T) {
+	if hasManualFulfillmentItems(nil) {
+		t.Fatalf("nil order should not have manual items")
+	}
+	upstreamOnly := &models.Order{Items: []models.OrderItem{{FulfillmentType: constants.FulfillmentTypeUpstream}}}
+	if hasManualFulfillmentItems(upstreamOnly) {
+		t.Fatalf("upstream-only order should not trigger manual fulfillment pending")
+	}
+	autoOnly := &models.Order{Items: []models.OrderItem{{FulfillmentType: constants.FulfillmentTypeAuto}}}
+	if hasManualFulfillmentItems(autoOnly) {
+		t.Fatalf("auto-only order should not have manual items")
+	}
+	manualOnly := &models.Order{Items: []models.OrderItem{{FulfillmentType: constants.FulfillmentTypeManual}}}
+	if !hasManualFulfillmentItems(manualOnly) {
+		t.Fatalf("manual order should have manual items")
+	}
+	emptyType := &models.Order{Items: []models.OrderItem{{FulfillmentType: "  "}}}
+	if !hasManualFulfillmentItems(emptyType) {
+		t.Fatalf("empty fulfillment type should be treated as manual")
+	}
+	mixedUpstreamManual := &models.Order{Items: []models.OrderItem{
+		{FulfillmentType: constants.FulfillmentTypeUpstream},
+		{FulfillmentType: constants.FulfillmentTypeManual},
+	}}
+	if !hasManualFulfillmentItems(mixedUpstreamManual) {
+		t.Fatalf("mixed upstream+manual order should have manual items")
+	}
+}
+
 func TestIsOrderFullyAutoFulfill(t *testing.T) {
 	if isOrderFullyAutoFulfill(nil) {
 		t.Fatalf("nil order should not be fully auto")
