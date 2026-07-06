@@ -12,6 +12,8 @@ var (
 	ErrInvalidPassword                     = errors.New("invalid password")
 	ErrWeakPassword                        = errors.New("weak password")
 	ErrInvalidPostType                     = errors.New("invalid post type")
+	ErrPostCategoryInvalid                 = errors.New("post category invalid")
+	ErrPostNoticeCategoryUnsupported       = errors.New("post notice category unsupported")
 	ErrEmailExists                         = errors.New("email exists")
 	ErrEmailNotVerified                    = errors.New("email not verified")
 	ErrUserDisabled                        = errors.New("user disabled")
