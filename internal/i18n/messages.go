@@ -330,6 +330,8 @@ var messages = map[string]map[string]string{
 		"error.totp_too_many_attempts":           "失败次数过多，请稍后重试",
 		"error.totp_challenge_invalid":           "登录会话已失效，请重新输入密码",
 		"error.totp_cannot_reset_self":           "无法通过此入口重置自己的 2FA，请使用 admin-tool CLI",
+		"error.invalid_upstream_status":          "无效的上游状态参数",
+		"error.invalid_product_status":           "无效的商品状态参数",
 	},
 	LocaleTW: {
 		"error.jwt_secret_missing":                       "JWT secret 未配置",
@@ -646,6 +648,8 @@ var messages = map[string]map[string]string{
 		"error.totp_too_many_attempts":           "失敗次數過多，請稍後重試",
 		"error.totp_challenge_invalid":           "登入工作階段已失效，請重新輸入密碼",
 		"error.totp_cannot_reset_self":           "無法透過此入口重設自己的 2FA，請使用 admin-tool CLI",
+		"error.invalid_upstream_status":          "無效的上游狀態參數",
+		"error.invalid_product_status":           "無效的商品狀態參數",
 	},
 	LocaleEN: {
 		"error.jwt_secret_missing":                       "JWT secret is not configured",
@@ -962,6 +966,8 @@ var messages = map[string]map[string]string{
 		"error.totp_too_many_attempts":           "Too many failed attempts, please try again later",
 		"error.totp_challenge_invalid":           "Login session expired, please re-enter your password",
 		"error.totp_cannot_reset_self":           "You cannot reset your own 2FA from this endpoint; use admin-tool CLI",
+		"error.invalid_upstream_status":          "Invalid upstream status parameter",
+		"error.invalid_product_status":           "Invalid product status parameter",
 	},
 }
 
