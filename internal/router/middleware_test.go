@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/dujiao-next/internal/config"
 	"github.com/gin-gonic/gin"
 )
 
@@ -96,5 +97,36 @@ func TestJWTAuthMiddlewareMissingSecret(t *testing.T) {
 	}
 	if resp.StatusCode != 401 {
 		t.Fatalf("status_code want 401 got %d", resp.StatusCode)
+	}
+}
+
+func TestCORSMiddlewareAllowsFrontendLanguageHeader(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.Use(CORSMiddleware(config.CORSConfig{
+		AllowedHeaders:   []string{"Content-Type", "Authorization"},
+		AllowCredentials: true,
+		MaxAge:           600,
+	}))
+	r.GET("/api/v1/public/config", func(c *gin.Context) {
+		c.String(http.StatusOK, "ok")
+	})
+
+	req := httptest.NewRequest(http.MethodOptions, "/api/v1/public/config", nil)
+	req.Header.Set("Origin", "http://127.0.0.1:5173")
+	req.Header.Set("Access-Control-Request-Method", http.MethodGet)
+	req.Header.Set("Access-Control-Request-Headers", "x-lang")
+
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("status=%d want %d", w.Code, http.StatusNoContent)
+	}
+	if got := w.Header().Get("Access-Control-Allow-Origin"); got != "http://127.0.0.1:5173" {
+		t.Fatalf("Access-Control-Allow-Origin=%q", got)
+	}
+	if got := w.Header().Get("Access-Control-Allow-Headers"); !strings.Contains(strings.ToLower(got), "x-lang") {
+		t.Fatalf("Access-Control-Allow-Headers=%q, want X-Lang", got)
 	}
 }

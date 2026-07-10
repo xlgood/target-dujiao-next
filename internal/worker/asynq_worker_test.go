@@ -35,6 +35,16 @@ func TestBuildBotNotifyRequestURLReplacesOrderPaidPath(t *testing.T) {
 	}
 }
 
+func TestProcurementSyncAcceptedTaskType(t *testing.T) {
+	task := queue.NewProcurementSyncAcceptedTask()
+	if task.Type() != queue.TaskProcurementSyncAccepted {
+		t.Fatalf("task type=%s, want %s", task.Type(), queue.TaskProcurementSyncAccepted)
+	}
+	if len(task.Payload()) != 0 {
+		t.Fatalf("expected empty payload, got %q", string(task.Payload()))
+	}
+}
+
 func TestBuildOrderFulfillmentEmailPayloadNilOrder(t *testing.T) {
 	if got := buildOrderFulfillmentEmailPayload(nil); got != "" {
 		t.Fatalf("expected empty payload for nil order, got %q", got)

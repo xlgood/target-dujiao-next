@@ -99,6 +99,18 @@ func createTestProcurementOrder(t *testing.T, db *gorm.DB, connID, localOrderID 
 	return proc
 }
 
+func setProcTestManualSubmission(t *testing.T, db *gorm.DB, orderID uint, submission models.JSON) {
+	t.Helper()
+	var item models.OrderItem
+	if err := db.Where("order_id = ?", orderID).First(&item).Error; err != nil {
+		t.Fatalf("load order item failed: %v", err)
+	}
+	item.ManualFormSubmissionJSON = submission
+	if err := db.Save(&item).Error; err != nil {
+		t.Fatalf("seed manual form failed: %v", err)
+	}
+}
+
 func newTestProcurementService(
 	db *gorm.DB,
 	connSvc *SiteConnectionService,
@@ -898,6 +910,301 @@ func TestSubmitToUpstream_RetryableError_Retries(t *testing.T) {
 	}
 }
 
+func TestSubmitToUpstream_FansGurusProvider(t *testing.T) {
+	db := setupProcurementTestDB(t)
+
+	order := createProcTestOrder(t, db, "PROC-FG-001", constants.OrderStatusPaid, constants.FulfillmentTypeUpstream)
+	setProcTestManualSubmission(t, db, order.ID, models.JSON{"link": "https://example.com/post"})
+	pm := &models.ProductMapping{
+		ConnectionID:        1,
+		LocalProductID:      1,
+		UpstreamProductCode: "12345",
+		Provider:            upstream.CatalogProviderFansGurus,
+		IsActive:            true,
+	}
+	db.Create(pm)
+	sm := &models.SKUMapping{ProductMappingID: pm.ID, LocalSKUID: 1, UpstreamSKUCode: "12345", UpstreamIsActive: true}
+	db.Create(sm)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil {
+			t.Fatalf("ParseForm: %v", err)
+		}
+		if got := r.FormValue("action"); got != "add" {
+			t.Fatalf("action=%s, want add", got)
+		}
+		if got := r.FormValue("service"); got != "12345" {
+			t.Fatalf("service=%s, want 12345", got)
+		}
+		if got := r.FormValue("link"); got != "https://example.com/post" {
+			t.Fatalf("link=%s", got)
+		}
+		if got := r.FormValue("quantity"); got != "1" {
+			t.Fatalf("quantity=%s, want 1", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"order": 9988, "charge": "0.50"})
+	}))
+	defer server.Close()
+
+	connSvc := NewSiteConnectionService(repository.NewSiteConnectionRepository(db), "test-key", t.TempDir())
+	conn, err := connSvc.Create(CreateConnectionInput{
+		Name: "fansgurus", BaseURL: server.URL,
+		ApiKey: "fans-key", ApiSecret: "unused", Protocol: constants.ConnectionProtocolFansGurus,
+	})
+	if err != nil {
+		t.Fatalf("create connection: %v", err)
+	}
+	if err := db.Model(pm).Update("connection_id", conn.ID).Error; err != nil {
+		t.Fatalf("update mapping connection: %v", err)
+	}
+
+	proc := createTestProcurementOrder(t, db, conn.ID, order.ID, order.OrderNo, "pending")
+	svc := newTestProcurementService(db, connSvc)
+
+	if err := svc.SubmitToUpstream(proc.ID); err != nil {
+		t.Fatalf("SubmitToUpstream: %v", err)
+	}
+
+	var updatedProc models.ProcurementOrder
+	db.First(&updatedProc, proc.ID)
+	if updatedProc.Status != constants.ProcurementStatusAccepted || updatedProc.UpstreamOrderNo != "9988" {
+		t.Fatalf("unexpected procurement: %+v", updatedProc)
+	}
+	var updatedOrder models.Order
+	db.First(&updatedOrder, order.ID)
+	if updatedOrder.Status != constants.OrderStatusFulfilling {
+		t.Fatalf("order status=%s, want %s", updatedOrder.Status, constants.OrderStatusFulfilling)
+	}
+}
+
+func TestSubmitToUpstream_FansGurusUnavailableFailsForUserWithoutRetry(t *testing.T) {
+	db := setupProcurementTestDB(t)
+
+	order := createProcTestOrder(t, db, "PROC-FG-UNAVAILABLE-001", constants.OrderStatusFulfilling, constants.FulfillmentTypeUpstream)
+	setProcTestManualSubmission(t, db, order.ID, models.JSON{"link": "https://example.com/post"})
+	pm := &models.ProductMapping{
+		ConnectionID:        1,
+		LocalProductID:      1,
+		UpstreamProductCode: "12345",
+		Provider:            upstream.CatalogProviderFansGurus,
+		IsActive:            true,
+	}
+	db.Create(pm)
+	sm := &models.SKUMapping{ProductMappingID: pm.ID, LocalSKUID: 1, UpstreamSKUCode: "12345", UpstreamIsActive: true}
+	db.Create(sm)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil {
+			t.Fatalf("ParseForm: %v", err)
+		}
+		if got := r.FormValue("action"); got != "add" {
+			t.Fatalf("action=%s, want add", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`not-json`))
+	}))
+	defer server.Close()
+
+	connSvc := NewSiteConnectionService(repository.NewSiteConnectionRepository(db), "test-key", t.TempDir())
+	conn, err := connSvc.Create(CreateConnectionInput{
+		Name: "fansgurus", BaseURL: server.URL,
+		ApiKey: "fans-key", ApiSecret: "unused", Protocol: constants.ConnectionProtocolFansGurus,
+		RetryMax: 3, RetryIntervals: "[30,60]",
+	})
+	if err != nil {
+		t.Fatalf("create connection: %v", err)
+	}
+	if err := db.Model(pm).Update("connection_id", conn.ID).Error; err != nil {
+		t.Fatalf("update mapping connection: %v", err)
+	}
+
+	proc := createTestProcurementOrder(t, db, conn.ID, order.ID, order.OrderNo, constants.ProcurementStatusPending)
+	svc := newTestProcurementService(db, connSvc)
+
+	if err := svc.SubmitToUpstream(proc.ID); err != nil {
+		t.Fatalf("SubmitToUpstream: %v", err)
+	}
+
+	var updatedProc models.ProcurementOrder
+	db.First(&updatedProc, proc.ID)
+	if updatedProc.Status != constants.ProcurementStatusFailed {
+		t.Fatalf("status=%s, want %s", updatedProc.Status, constants.ProcurementStatusFailed)
+	}
+	if updatedProc.RetryCount != 0 || updatedProc.NextRetryAt != nil {
+		t.Fatalf("unavailable provider submit must not auto retry: retry_count=%d next_retry_at=%v", updatedProc.RetryCount, updatedProc.NextRetryAt)
+	}
+	if updatedProc.ErrorMessage != providerSubmitTemporarilyUnavailable {
+		t.Fatalf("error_message=%q", updatedProc.ErrorMessage)
+	}
+	var updatedOrder models.Order
+	db.First(&updatedOrder, order.ID)
+	if updatedOrder.Status != constants.OrderStatusPaid {
+		t.Fatalf("order status=%s, want %s", updatedOrder.Status, constants.OrderStatusPaid)
+	}
+}
+
+func TestSubmitToUpstream_TGXProviderImmediateSecret(t *testing.T) {
+	db := setupProcurementTestDB(t)
+
+	order := createProcTestOrder(t, db, "PROC-TGX-001", constants.OrderStatusPaid, constants.FulfillmentTypeUpstream)
+	setProcTestManualSubmission(t, db, order.ID, models.JSON{"email": "buyer@example.com"})
+	pm := &models.ProductMapping{
+		ConnectionID:        1,
+		LocalProductID:      1,
+		UpstreamProductCode: "IG-001",
+		Provider:            upstream.CatalogProviderTGX,
+		IsActive:            true,
+	}
+	db.Create(pm)
+	sm := &models.SKUMapping{ProductMappingID: pm.ID, LocalSKUID: 1, UpstreamSKUCode: "IG-001|普通", UpstreamIsActive: true}
+	db.Create(sm)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/commodity/trade" {
+			t.Fatalf("path=%s, want /commodity/trade", r.URL.Path)
+		}
+		if err := r.ParseForm(); err != nil {
+			t.Fatalf("ParseForm: %v", err)
+		}
+		if got := r.FormValue("app_id"); got != "tgx-app-id" {
+			t.Fatalf("app_id=%s, want tgx-app-id", got)
+		}
+		if got := r.FormValue("shared_code"); got != "IG-001" {
+			t.Fatalf("shared_code=%s, want IG-001", got)
+		}
+		if got := r.FormValue("race"); got != "普通" {
+			t.Fatalf("race=%s, want 普通", got)
+		}
+		if got := r.FormValue("request_no"); got != order.OrderNo {
+			t.Fatalf("request_no=%s, want %s", got, order.OrderNo)
+		}
+		if got := r.FormValue("email"); got != "buyer@example.com" {
+			t.Fatalf("email=%s, want buyer@example.com", got)
+		}
+		if r.FormValue("app_key") != "" {
+			t.Fatal("app_key must not be sent")
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"code": 0,
+			"data": map[string]string{"trade_no": "TGX-9988", "secret": "account:pass", "status": "completed"},
+		})
+	}))
+	defer server.Close()
+
+	connSvc := NewSiteConnectionService(repository.NewSiteConnectionRepository(db), "test-key", t.TempDir())
+	conn, err := connSvc.Create(CreateConnectionInput{
+		Name: "tgx", BaseURL: server.URL,
+		ApiKey: "tgx-app-id", ApiSecret: "tgx-app-key", Protocol: constants.ConnectionProtocolTGXAccount,
+	})
+	if err != nil {
+		t.Fatalf("create connection: %v", err)
+	}
+	if err := db.Model(pm).Update("connection_id", conn.ID).Error; err != nil {
+		t.Fatalf("update mapping connection: %v", err)
+	}
+
+	proc := createTestProcurementOrder(t, db, conn.ID, order.ID, order.OrderNo, "pending")
+	svc := newTestProcurementService(db, connSvc)
+
+	if err := svc.SubmitToUpstream(proc.ID); err != nil {
+		t.Fatalf("SubmitToUpstream: %v", err)
+	}
+
+	var updatedProc models.ProcurementOrder
+	db.First(&updatedProc, proc.ID)
+	if updatedProc.Status != constants.ProcurementStatusFulfilled || updatedProc.UpstreamOrderNo != "TGX-9988" {
+		t.Fatalf("unexpected procurement: %+v", updatedProc)
+	}
+	var fulfillment models.Fulfillment
+	if err := db.Where("order_id = ?", order.ID).First(&fulfillment).Error; err != nil {
+		t.Fatalf("load fulfillment: %v", err)
+	}
+	if fulfillment.Payload != "account:pass" {
+		t.Fatalf("payload=%q, want account:pass", fulfillment.Payload)
+	}
+}
+
+func TestSubmitToUpstream_TGXProviderRecoversByRequestNo(t *testing.T) {
+	db := setupProcurementTestDB(t)
+
+	order := createProcTestOrder(t, db, "PROC-TGX-RECOVER-001", constants.OrderStatusPaid, constants.FulfillmentTypeUpstream)
+	setProcTestManualSubmission(t, db, order.ID, models.JSON{"email": "buyer@example.com"})
+	pm := &models.ProductMapping{
+		ConnectionID:        1,
+		LocalProductID:      1,
+		UpstreamProductCode: "IG-001",
+		Provider:            upstream.CatalogProviderTGX,
+		IsActive:            true,
+	}
+	db.Create(pm)
+	sm := &models.SKUMapping{ProductMappingID: pm.ID, LocalSKUID: 1, UpstreamSKUCode: "IG-001|普通", UpstreamIsActive: true}
+	db.Create(sm)
+
+	var tradeCalls int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil {
+			t.Fatalf("ParseForm: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/commodity/trade":
+			tradeCalls++
+			if got := r.FormValue("request_no"); got != order.OrderNo {
+				t.Fatalf("request_no=%s, want %s", got, order.OrderNo)
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "data": map[string]string{}})
+		case "/commodity/query":
+			if got := r.FormValue("request_no"); got != order.OrderNo {
+				t.Fatalf("request_no=%s, want %s", got, order.OrderNo)
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"code": 0,
+				"data": map[string]string{"trade_no": "TGX-RECOVERED-1", "secret": "account:pass", "status": "completed"},
+			})
+		default:
+			t.Fatalf("path=%s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	connSvc := NewSiteConnectionService(repository.NewSiteConnectionRepository(db), "test-key", t.TempDir())
+	conn, err := connSvc.Create(CreateConnectionInput{
+		Name: "tgx", BaseURL: server.URL,
+		ApiKey: "tgx-app-id", ApiSecret: "tgx-app-key", Protocol: constants.ConnectionProtocolTGXAccount,
+	})
+	if err != nil {
+		t.Fatalf("create connection: %v", err)
+	}
+	if err := db.Model(pm).Update("connection_id", conn.ID).Error; err != nil {
+		t.Fatalf("update mapping connection: %v", err)
+	}
+
+	proc := createTestProcurementOrder(t, db, conn.ID, order.ID, order.OrderNo, constants.ProcurementStatusPending)
+	svc := newTestProcurementService(db, connSvc)
+
+	if err := svc.SubmitToUpstream(proc.ID); err != nil {
+		t.Fatalf("SubmitToUpstream: %v", err)
+	}
+	if tradeCalls != 1 {
+		t.Fatalf("trade calls=%d, want 1", tradeCalls)
+	}
+
+	var updatedProc models.ProcurementOrder
+	db.First(&updatedProc, proc.ID)
+	if updatedProc.Status != constants.ProcurementStatusFulfilled || updatedProc.UpstreamOrderNo != "TGX-RECOVERED-1" {
+		t.Fatalf("unexpected procurement: %+v", updatedProc)
+	}
+	var fulfillment models.Fulfillment
+	if err := db.Where("order_id = ?", order.ID).First(&fulfillment).Error; err != nil {
+		t.Fatalf("load fulfillment: %v", err)
+	}
+	if fulfillment.Payload != "account:pass" {
+		t.Fatalf("payload=%q, want account:pass", fulfillment.Payload)
+	}
+}
+
 func TestHandleSubmitFailure_MaxRetriesExhausted(t *testing.T) {
 	db := setupProcurementTestDB(t)
 
@@ -931,6 +1238,304 @@ func TestHandleSubmitFailure_MaxRetriesExhausted(t *testing.T) {
 	db.First(&updatedOrder, order.ID)
 	if updatedOrder.Status != constants.OrderStatusPaid {
 		t.Errorf("expected order status %q, got %q", constants.OrderStatusPaid, updatedOrder.Status)
+	}
+}
+
+func TestProviderFulfillmentEndToEnd_FansGurusMock(t *testing.T) {
+	db := setupProcurementTestDB(t)
+
+	order := createProcTestOrder(t, db, "PROC-E2E-FG-001", constants.OrderStatusPaid, constants.FulfillmentTypeUpstream)
+	setProcTestManualSubmission(t, db, order.ID, models.JSON{"link": "https://example.com/post"})
+
+	var addCalls int
+	var statusCalls int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil {
+			t.Fatalf("ParseForm: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch r.FormValue("action") {
+		case "add":
+			addCalls++
+			if got := r.FormValue("service"); got != "12345" {
+				t.Fatalf("service=%s, want 12345", got)
+			}
+			if got := r.FormValue("link"); got != "https://example.com/post" {
+				t.Fatalf("link=%s, want https://example.com/post", got)
+			}
+			if got := r.FormValue("quantity"); got != "1" {
+				t.Fatalf("quantity=%s, want 1", got)
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"order": 9988, "charge": "0.50"})
+		case "status":
+			statusCalls++
+			if got := r.FormValue("order"); got != "9988" {
+				t.Fatalf("order=%s, want 9988", got)
+			}
+			_ = json.NewEncoder(w).Encode(map[string]string{"status": "Completed", "charge": "0.50", "currency": "USD"})
+		default:
+			t.Fatalf("unexpected action %q", r.FormValue("action"))
+		}
+	}))
+	defer server.Close()
+
+	connSvc := NewSiteConnectionService(repository.NewSiteConnectionRepository(db), "test-key", t.TempDir())
+	conn, err := connSvc.Create(CreateConnectionInput{
+		Name: "fansgurus", BaseURL: server.URL,
+		ApiKey: "fans-key", ApiSecret: "unused", Protocol: constants.ConnectionProtocolFansGurus,
+	})
+	if err != nil {
+		t.Fatalf("create connection: %v", err)
+	}
+	pm := &models.ProductMapping{
+		ConnectionID:        conn.ID,
+		LocalProductID:      1,
+		UpstreamProductCode: "12345",
+		Provider:            upstream.CatalogProviderFansGurus,
+		IsActive:            true,
+	}
+	if err := db.Create(pm).Error; err != nil {
+		t.Fatalf("create product mapping: %v", err)
+	}
+	if err := db.Create(&models.SKUMapping{ProductMappingID: pm.ID, LocalSKUID: 1, UpstreamSKUCode: "12345", UpstreamIsActive: true}).Error; err != nil {
+		t.Fatalf("create sku mapping: %v", err)
+	}
+	svc := newTestProcurementService(db, connSvc)
+
+	if err := svc.CreateForOrder(order.ID); err != nil {
+		t.Fatalf("CreateForOrder: %v", err)
+	}
+	proc, err := repository.NewProcurementOrderRepository(db).GetByLocalOrderID(order.ID)
+	if err != nil {
+		t.Fatalf("load procurement: %v", err)
+	}
+	if proc == nil || proc.Status != constants.ProcurementStatusPending {
+		t.Fatalf("procurement after create=%+v, want pending", proc)
+	}
+
+	if err := svc.SubmitToUpstream(proc.ID); err != nil {
+		t.Fatalf("SubmitToUpstream: %v", err)
+	}
+	var submitted models.ProcurementOrder
+	db.First(&submitted, proc.ID)
+	if submitted.Status != constants.ProcurementStatusAccepted || submitted.UpstreamOrderNo != "9988" {
+		t.Fatalf("procurement after submit=%+v, want accepted upstream 9988", submitted)
+	}
+	var fulfillingOrder models.Order
+	db.First(&fulfillingOrder, order.ID)
+	if fulfillingOrder.Status != constants.OrderStatusFulfilling {
+		t.Fatalf("order after submit status=%s, want %s", fulfillingOrder.Status, constants.OrderStatusFulfilling)
+	}
+
+	svc.SyncAcceptedOrders()
+
+	var fulfilledProc models.ProcurementOrder
+	db.First(&fulfilledProc, proc.ID)
+	if fulfilledProc.Status != constants.ProcurementStatusFulfilled {
+		t.Fatalf("procurement after sync status=%s, want %s", fulfilledProc.Status, constants.ProcurementStatusFulfilled)
+	}
+	var deliveredOrder models.Order
+	db.First(&deliveredOrder, order.ID)
+	if deliveredOrder.Status != constants.OrderStatusDelivered {
+		t.Fatalf("order after sync status=%s, want %s", deliveredOrder.Status, constants.OrderStatusDelivered)
+	}
+	if addCalls != 1 || statusCalls != 1 {
+		t.Fatalf("addCalls=%d statusCalls=%d, want 1/1", addCalls, statusCalls)
+	}
+}
+
+func TestProviderFulfillmentEndToEnd_TGXMockDelayedSecret(t *testing.T) {
+	db := setupProcurementTestDB(t)
+
+	order := createProcTestOrder(t, db, "PROC-E2E-TGX-001", constants.OrderStatusPaid, constants.FulfillmentTypeUpstream)
+	setProcTestManualSubmission(t, db, order.ID, models.JSON{"email": "buyer@example.com"})
+
+	var tradeCalls int
+	var queryCalls int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil {
+			t.Fatalf("ParseForm: %v", err)
+		}
+		if got := r.FormValue("app_id"); got != "tgx-app-id" {
+			t.Fatalf("app_id=%s, want tgx-app-id", got)
+		}
+		if r.FormValue("app_key") != "" {
+			t.Fatal("app_key must not be sent")
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/commodity/trade":
+			tradeCalls++
+			if got := r.FormValue("shared_code"); got != "IG-001" {
+				t.Fatalf("shared_code=%s, want IG-001", got)
+			}
+			if got := r.FormValue("race"); got != "普通" {
+				t.Fatalf("race=%s, want 普通", got)
+			}
+			if got := r.FormValue("request_no"); got != order.OrderNo {
+				t.Fatalf("request_no=%s, want %s", got, order.OrderNo)
+			}
+			if got := r.FormValue("email"); got != "buyer@example.com" {
+				t.Fatalf("email=%s, want buyer@example.com", got)
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"code": 0,
+				"data": map[string]string{"trade_no": "TGX-E2E-9988", "status": "pending"},
+			})
+		case "/commodity/query":
+			queryCalls++
+			if got := r.FormValue("trade_no"); got != "TGX-E2E-9988" {
+				t.Fatalf("trade_no=%s, want TGX-E2E-9988", got)
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"code": 0,
+				"data": map[string]string{"trade_no": "TGX-E2E-9988", "secret": "account:pass", "status": "completed"},
+			})
+		default:
+			t.Fatalf("path=%s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	connSvc := NewSiteConnectionService(repository.NewSiteConnectionRepository(db), "test-key", t.TempDir())
+	conn, err := connSvc.Create(CreateConnectionInput{
+		Name: "tgx", BaseURL: server.URL,
+		ApiKey: "tgx-app-id", ApiSecret: "tgx-app-key", Protocol: constants.ConnectionProtocolTGXAccount,
+	})
+	if err != nil {
+		t.Fatalf("create connection: %v", err)
+	}
+	pm := &models.ProductMapping{
+		ConnectionID:        conn.ID,
+		LocalProductID:      1,
+		UpstreamProductCode: "IG-001",
+		Provider:            upstream.CatalogProviderTGX,
+		IsActive:            true,
+	}
+	if err := db.Create(pm).Error; err != nil {
+		t.Fatalf("create product mapping: %v", err)
+	}
+	if err := db.Create(&models.SKUMapping{ProductMappingID: pm.ID, LocalSKUID: 1, UpstreamSKUCode: "IG-001|普通", UpstreamIsActive: true}).Error; err != nil {
+		t.Fatalf("create sku mapping: %v", err)
+	}
+	svc := newTestProcurementService(db, connSvc)
+
+	if err := svc.CreateForOrder(order.ID); err != nil {
+		t.Fatalf("CreateForOrder: %v", err)
+	}
+	proc, err := repository.NewProcurementOrderRepository(db).GetByLocalOrderID(order.ID)
+	if err != nil {
+		t.Fatalf("load procurement: %v", err)
+	}
+	if proc == nil || proc.Status != constants.ProcurementStatusPending {
+		t.Fatalf("procurement after create=%+v, want pending", proc)
+	}
+
+	if err := svc.SubmitToUpstream(proc.ID); err != nil {
+		t.Fatalf("SubmitToUpstream: %v", err)
+	}
+	var submitted models.ProcurementOrder
+	db.First(&submitted, proc.ID)
+	if submitted.Status != constants.ProcurementStatusAccepted || submitted.UpstreamOrderNo != "TGX-E2E-9988" {
+		t.Fatalf("procurement after submit=%+v, want accepted upstream TGX-E2E-9988", submitted)
+	}
+	var fulfillingOrder models.Order
+	db.First(&fulfillingOrder, order.ID)
+	if fulfillingOrder.Status != constants.OrderStatusFulfilling {
+		t.Fatalf("order after submit status=%s, want %s", fulfillingOrder.Status, constants.OrderStatusFulfilling)
+	}
+
+	svc.SyncAcceptedOrders()
+
+	var fulfilledProc models.ProcurementOrder
+	db.First(&fulfilledProc, proc.ID)
+	if fulfilledProc.Status != constants.ProcurementStatusFulfilled {
+		t.Fatalf("procurement after sync status=%s, want %s", fulfilledProc.Status, constants.ProcurementStatusFulfilled)
+	}
+	var deliveredOrder models.Order
+	db.First(&deliveredOrder, order.ID)
+	if deliveredOrder.Status != constants.OrderStatusDelivered {
+		t.Fatalf("order after sync status=%s, want %s", deliveredOrder.Status, constants.OrderStatusDelivered)
+	}
+	var fulfillment models.Fulfillment
+	if err := db.Where("order_id = ?", order.ID).First(&fulfillment).Error; err != nil {
+		t.Fatalf("load fulfillment: %v", err)
+	}
+	if fulfillment.Payload != "account:pass" {
+		t.Fatalf("payload=%q, want account:pass", fulfillment.Payload)
+	}
+	if tradeCalls != 1 || queryCalls != 1 {
+		t.Fatalf("tradeCalls=%d queryCalls=%d, want 1/1", tradeCalls, queryCalls)
+	}
+}
+
+func TestCancelManual_ProviderAcceptedUnsupported(t *testing.T) {
+	db := setupProcurementTestDB(t)
+
+	order := createProcTestOrder(t, db, "PROC-CANCEL-PROVIDER-001", constants.OrderStatusFulfilling, constants.FulfillmentTypeUpstream)
+	conn := &models.SiteConnection{
+		Name:     "FansGurus",
+		Protocol: constants.ConnectionProtocolFansGurus,
+		BaseURL:  "https://fansgurus.test/api",
+		ApiKey:   "test-key",
+		Status:   constants.ConnectionStatusActive,
+	}
+	if err := db.Create(conn).Error; err != nil {
+		t.Fatalf("create connection: %v", err)
+	}
+	proc := createTestProcurementOrder(t, db, conn.ID, order.ID, order.OrderNo, constants.ProcurementStatusAccepted)
+	if err := db.Model(proc).Updates(map[string]interface{}{
+		"upstream_order_id": uint(123),
+		"upstream_order_no": "123",
+	}).Error; err != nil {
+		t.Fatalf("seed procurement upstream id: %v", err)
+	}
+
+	connSvc := NewSiteConnectionService(repository.NewSiteConnectionRepository(db), "test-key", t.TempDir())
+	svc := newTestProcurementService(db, connSvc)
+
+	if err := svc.CancelManual(proc.ID); err != ErrProcurementCancelUnsupported {
+		t.Fatalf("CancelManual error=%v, want %v", err, ErrProcurementCancelUnsupported)
+	}
+
+	var updatedProc models.ProcurementOrder
+	if err := db.First(&updatedProc, proc.ID).Error; err != nil {
+		t.Fatalf("load procurement: %v", err)
+	}
+	if updatedProc.Status != constants.ProcurementStatusAccepted {
+		t.Fatalf("status=%s, want %s", updatedProc.Status, constants.ProcurementStatusAccepted)
+	}
+}
+
+func TestCancelManual_FailedLocalOnlyCancels(t *testing.T) {
+	db := setupProcurementTestDB(t)
+
+	order := createProcTestOrder(t, db, "PROC-CANCEL-FAILED-001", constants.OrderStatusPaid, constants.FulfillmentTypeUpstream)
+	conn := &models.SiteConnection{
+		Name:     "TGX",
+		Protocol: constants.ConnectionProtocolTGXAccount,
+		BaseURL:  "https://tgx.test/shared",
+		ApiKey:   "app-id",
+		Status:   constants.ConnectionStatusActive,
+	}
+	if err := db.Create(conn).Error; err != nil {
+		t.Fatalf("create connection: %v", err)
+	}
+	proc := createTestProcurementOrder(t, db, conn.ID, order.ID, order.OrderNo, constants.ProcurementStatusFailed)
+
+	connSvc := NewSiteConnectionService(repository.NewSiteConnectionRepository(db), "test-key", t.TempDir())
+	svc := newTestProcurementService(db, connSvc)
+
+	if err := svc.CancelManual(proc.ID); err != nil {
+		t.Fatalf("CancelManual: %v", err)
+	}
+
+	var updatedProc models.ProcurementOrder
+	if err := db.First(&updatedProc, proc.ID).Error; err != nil {
+		t.Fatalf("load procurement: %v", err)
+	}
+	if updatedProc.Status != constants.ProcurementStatusCanceled {
+		t.Fatalf("status=%s, want %s", updatedProc.Status, constants.ProcurementStatusCanceled)
 	}
 }
 
@@ -1088,6 +1693,203 @@ func TestPollUpstreamStatus_FulfilledMappedToDelivered(t *testing.T) {
 	db.First(&updatedOrder, order.ID)
 	if updatedOrder.Status != constants.OrderStatusDelivered {
 		t.Errorf("expected order status %q, got %q", constants.OrderStatusDelivered, updatedOrder.Status)
+	}
+}
+
+func TestPollUpstreamStatus_FansGurusCompleted(t *testing.T) {
+	db := setupProcurementTestDB(t)
+
+	order := createProcTestOrder(t, db, "PROC-POLL-FG-001", constants.OrderStatusFulfilling, constants.FulfillmentTypeUpstream)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil {
+			t.Fatalf("ParseForm: %v", err)
+		}
+		if got := r.FormValue("action"); got != "status" {
+			t.Fatalf("action=%s, want status", got)
+		}
+		if got := r.FormValue("order"); got != "9988" {
+			t.Fatalf("order=%s, want 9988", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{"status": "Completed", "charge": "0.50", "currency": "USD"})
+	}))
+	defer server.Close()
+
+	connSvc := NewSiteConnectionService(repository.NewSiteConnectionRepository(db), "test-key", t.TempDir())
+	conn, err := connSvc.Create(CreateConnectionInput{
+		Name: "fansgurus", BaseURL: server.URL,
+		ApiKey: "fans-key", ApiSecret: "unused", Protocol: constants.ConnectionProtocolFansGurus,
+	})
+	if err != nil {
+		t.Fatalf("create connection: %v", err)
+	}
+	proc := createTestProcurementOrder(t, db, conn.ID, order.ID, order.OrderNo, constants.ProcurementStatusAccepted)
+	db.Model(proc).Updates(map[string]interface{}{
+		"upstream_order_id": uint(9988),
+		"upstream_order_no": "9988",
+	})
+	svc := newTestProcurementService(db, connSvc)
+
+	if err := svc.PollUpstreamStatus(proc.ID); err != nil {
+		t.Fatalf("PollUpstreamStatus: %v", err)
+	}
+
+	var updatedProc models.ProcurementOrder
+	db.First(&updatedProc, proc.ID)
+	if updatedProc.Status != constants.ProcurementStatusFulfilled {
+		t.Fatalf("procurement status=%s, want %s", updatedProc.Status, constants.ProcurementStatusFulfilled)
+	}
+	var updatedOrder models.Order
+	db.First(&updatedOrder, order.ID)
+	if updatedOrder.Status != constants.OrderStatusDelivered {
+		t.Fatalf("order status=%s, want %s", updatedOrder.Status, constants.OrderStatusDelivered)
+	}
+}
+
+func TestSyncAcceptedOrders_FansGurusCompleted(t *testing.T) {
+	db := setupProcurementTestDB(t)
+
+	order := createProcTestOrder(t, db, "PROC-SYNC-FG-001", constants.OrderStatusFulfilling, constants.FulfillmentTypeUpstream)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil {
+			t.Fatalf("ParseForm: %v", err)
+		}
+		if got := r.FormValue("action"); got != "status" {
+			t.Fatalf("action=%s, want status", got)
+		}
+		if got := r.FormValue("order"); got != "9989" {
+			t.Fatalf("order=%s, want 9989", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{"status": "Completed", "charge": "0.50", "currency": "USD"})
+	}))
+	defer server.Close()
+
+	connSvc := NewSiteConnectionService(repository.NewSiteConnectionRepository(db), "test-key", t.TempDir())
+	conn, err := connSvc.Create(CreateConnectionInput{
+		Name: "fansgurus", BaseURL: server.URL,
+		ApiKey: "fans-key", ApiSecret: "unused", Protocol: constants.ConnectionProtocolFansGurus,
+	})
+	if err != nil {
+		t.Fatalf("create connection: %v", err)
+	}
+	proc := createTestProcurementOrder(t, db, conn.ID, order.ID, order.OrderNo, constants.ProcurementStatusAccepted)
+	db.Model(proc).Updates(map[string]interface{}{
+		"upstream_order_id": uint(9989),
+		"upstream_order_no": "9989",
+	})
+	svc := newTestProcurementService(db, connSvc)
+
+	svc.SyncAcceptedOrders()
+
+	var updatedProc models.ProcurementOrder
+	db.First(&updatedProc, proc.ID)
+	if updatedProc.Status != constants.ProcurementStatusFulfilled {
+		t.Fatalf("procurement status=%s, want %s", updatedProc.Status, constants.ProcurementStatusFulfilled)
+	}
+	var updatedOrder models.Order
+	db.First(&updatedOrder, order.ID)
+	if updatedOrder.Status != constants.OrderStatusDelivered {
+		t.Fatalf("order status=%s, want %s", updatedOrder.Status, constants.OrderStatusDelivered)
+	}
+}
+
+func TestPollUpstreamStatus_TGXQueryDeliveredSecret(t *testing.T) {
+	db := setupProcurementTestDB(t)
+
+	order := createProcTestOrder(t, db, "PROC-POLL-TGX-001", constants.OrderStatusFulfilling, constants.FulfillmentTypeUpstream)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/commodity/query" {
+			t.Fatalf("path=%s, want /commodity/query", r.URL.Path)
+		}
+		if err := r.ParseForm(); err != nil {
+			t.Fatalf("ParseForm: %v", err)
+		}
+		if got := r.FormValue("trade_no"); got != "TGX-9988" {
+			t.Fatalf("trade_no=%s, want TGX-9988", got)
+		}
+		if got := r.FormValue("app_id"); got != "tgx-app-id" {
+			t.Fatalf("app_id=%s, want tgx-app-id", got)
+		}
+		if r.FormValue("app_key") != "" {
+			t.Fatal("app_key must not be sent")
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"code": 0,
+			"data": map[string]string{"trade_no": "TGX-9988", "secret": "account:pass", "status": "completed"},
+		})
+	}))
+	defer server.Close()
+
+	connSvc := NewSiteConnectionService(repository.NewSiteConnectionRepository(db), "test-key", t.TempDir())
+	conn, err := connSvc.Create(CreateConnectionInput{
+		Name: "tgx", BaseURL: server.URL,
+		ApiKey: "tgx-app-id", ApiSecret: "tgx-app-key", Protocol: constants.ConnectionProtocolTGXAccount,
+	})
+	if err != nil {
+		t.Fatalf("create connection: %v", err)
+	}
+	proc := createTestProcurementOrder(t, db, conn.ID, order.ID, order.OrderNo, constants.ProcurementStatusAccepted)
+	db.Model(proc).Update("upstream_order_no", "TGX-9988")
+	svc := newTestProcurementService(db, connSvc)
+
+	if err := svc.PollUpstreamStatus(proc.ID); err != nil {
+		t.Fatalf("PollUpstreamStatus: %v", err)
+	}
+
+	var updatedProc models.ProcurementOrder
+	db.First(&updatedProc, proc.ID)
+	if updatedProc.Status != constants.ProcurementStatusFulfilled {
+		t.Fatalf("procurement status=%s, want %s", updatedProc.Status, constants.ProcurementStatusFulfilled)
+	}
+	var fulfillment models.Fulfillment
+	if err := db.Where("order_id = ?", order.ID).First(&fulfillment).Error; err != nil {
+		t.Fatalf("load fulfillment: %v", err)
+	}
+	if fulfillment.Payload != "account:pass" {
+		t.Fatalf("payload=%q, want account:pass", fulfillment.Payload)
+	}
+}
+
+func TestPollUpstreamStatus_TGXQueryPendingKeepsAccepted(t *testing.T) {
+	db := setupProcurementTestDB(t)
+
+	order := createProcTestOrder(t, db, "PROC-POLL-TGX-PENDING-001", constants.OrderStatusFulfilling, constants.FulfillmentTypeUpstream)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"code": 0,
+			"data": map[string]string{"trade_no": "TGX-PENDING", "status": "pending"},
+		})
+	}))
+	defer server.Close()
+
+	connSvc := NewSiteConnectionService(repository.NewSiteConnectionRepository(db), "test-key", t.TempDir())
+	conn, err := connSvc.Create(CreateConnectionInput{
+		Name: "tgx", BaseURL: server.URL,
+		ApiKey: "tgx-app-id", ApiSecret: "tgx-app-key", Protocol: constants.ConnectionProtocolTGXAccount,
+	})
+	if err != nil {
+		t.Fatalf("create connection: %v", err)
+	}
+	proc := createTestProcurementOrder(t, db, conn.ID, order.ID, order.OrderNo, constants.ProcurementStatusAccepted)
+	db.Model(proc).Update("upstream_order_no", "TGX-PENDING")
+	svc := newTestProcurementService(db, connSvc)
+
+	if err := svc.PollUpstreamStatus(proc.ID); err != nil {
+		t.Fatalf("PollUpstreamStatus: %v", err)
+	}
+
+	var updatedProc models.ProcurementOrder
+	db.First(&updatedProc, proc.ID)
+	if updatedProc.Status != constants.ProcurementStatusAccepted {
+		t.Fatalf("procurement status=%s, want %s", updatedProc.Status, constants.ProcurementStatusAccepted)
+	}
+	var count int64
+	db.Model(&models.Fulfillment{}).Where("order_id = ?", order.ID).Count(&count)
+	if count != 0 {
+		t.Fatalf("fulfillment count=%d, want 0", count)
 	}
 }
 

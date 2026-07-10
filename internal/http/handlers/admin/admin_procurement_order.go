@@ -177,6 +177,32 @@ func (h *Handler) RetryProcurementOrder(c *gin.Context) {
 	response.Success(c, gin.H{"ok": true})
 }
 
+// SyncProcurementOrderStatus 手动同步采购单状态
+func (h *Handler) SyncProcurementOrderStatus(c *gin.Context) {
+	if h.ProcurementOrderService == nil {
+		shared.RespondErrorWithMsg(c, response.CodeInternal, "service not available", nil)
+		return
+	}
+	id, err := shared.ParseParamUint(c, "id")
+	if err != nil {
+		shared.RespondError(c, response.CodeBadRequest, "error.bad_request", err)
+		return
+	}
+	if err := h.ProcurementOrderService.PollUpstreamStatus(id); err != nil {
+		if errors.Is(err, service.ErrProcurementNotFound) {
+			shared.RespondError(c, response.CodeNotFound, "error.procurement_not_found", nil)
+			return
+		}
+		if errors.Is(err, service.ErrConnectionNotFound) {
+			shared.RespondError(c, response.CodeNotFound, "error.connection_not_found", nil)
+			return
+		}
+		shared.RespondError(c, response.CodeInternal, "error.procurement_fetch_failed", err)
+		return
+	}
+	response.Success(c, gin.H{"ok": true})
+}
+
 // CancelProcurementOrder 手动取消采购单
 func (h *Handler) CancelProcurementOrder(c *gin.Context) {
 	if h.ProcurementOrderService == nil {
@@ -194,6 +220,10 @@ func (h *Handler) CancelProcurementOrder(c *gin.Context) {
 			return
 		}
 		if errors.Is(err, service.ErrProcurementStatusInvalid) {
+			shared.RespondErrorWithMsg(c, response.CodeBadRequest, err.Error(), nil)
+			return
+		}
+		if errors.Is(err, service.ErrProcurementCancelUnsupported) {
 			shared.RespondErrorWithMsg(c, response.CodeBadRequest, err.Error(), nil)
 			return
 		}

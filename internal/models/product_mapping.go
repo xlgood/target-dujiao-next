@@ -19,6 +19,9 @@ type ProductMapping struct {
 	ConnectionID            uint           `gorm:"index;not null" json:"connection_id"`
 	LocalProductID          uint           `gorm:"uniqueIndex;not null" json:"local_product_id"`
 	UpstreamProductID       uint           `gorm:"not null" json:"upstream_product_id"`
+	UpstreamProductCode     string         `gorm:"type:varchar(128);index" json:"upstream_product_code"`
+	Provider                string         `gorm:"type:varchar(32);index" json:"provider"`
+	Platform                string         `gorm:"type:varchar(32);index" json:"platform"`
 	UpstreamFulfillmentType string         `gorm:"type:varchar(20);not null;default:'manual'" json:"upstream_fulfillment_type"` // 上游原始交付类型（auto/manual）
 	UpstreamStatus          string         `gorm:"type:varchar(16);not null;default:'active';index" json:"upstream_status"`     // 上游商品状态：active/inactive/deleted
 	IsActive                bool           `gorm:"not null;default:true" json:"is_active"`
@@ -42,6 +45,7 @@ type SKUMapping struct {
 	ProductMappingID uint           `gorm:"index;not null" json:"product_mapping_id"`
 	LocalSKUID       uint           `gorm:"column:local_sku_id;index;not null" json:"local_sku_id"`
 	UpstreamSKUID    uint           `gorm:"column:upstream_sku_id;not null" json:"upstream_sku_id"`
+	UpstreamSKUCode  string         `gorm:"type:varchar(128);index" json:"upstream_sku_code"`
 	UpstreamPrice    Money          `gorm:"type:decimal(20,2);not null;default:0" json:"upstream_price"`
 	UpstreamStock    int            `gorm:"not null;default:0" json:"upstream_stock"`
 	UpstreamIsActive bool           `gorm:"not null;default:true" json:"upstream_is_active"`

@@ -13,6 +13,7 @@ type SKUMappingRepository interface {
 	GetByID(id uint) (*models.SKUMapping, error)
 	GetByLocalSKUID(skuID uint) (*models.SKUMapping, error)
 	GetByMappingAndUpstreamSKUID(productMappingID, upstreamSKUID uint) (*models.SKUMapping, error)
+	GetByMappingAndUpstreamSKUCode(productMappingID uint, upstreamSKUCode string) (*models.SKUMapping, error)
 	ListByProductMapping(productMappingID uint) ([]models.SKUMapping, error)
 	ListByProductMappingIDs(productMappingIDs []uint) ([]models.SKUMapping, error)
 	WithTx(tx *gorm.DB) SKUMappingRepository
@@ -62,6 +63,17 @@ func (r *GormSKUMappingRepository) GetByLocalSKUID(skuID uint) (*models.SKUMappi
 func (r *GormSKUMappingRepository) GetByMappingAndUpstreamSKUID(productMappingID, upstreamSKUID uint) (*models.SKUMapping, error) {
 	var m models.SKUMapping
 	if err := r.db.Where("product_mapping_id = ? AND upstream_sku_id = ?", productMappingID, upstreamSKUID).First(&m).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &m, nil
+}
+
+func (r *GormSKUMappingRepository) GetByMappingAndUpstreamSKUCode(productMappingID uint, upstreamSKUCode string) (*models.SKUMapping, error) {
+	var m models.SKUMapping
+	if err := r.db.Where("product_mapping_id = ? AND upstream_sku_code = ?", productMappingID, upstreamSKUCode).First(&m).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, nil
 		}

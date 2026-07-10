@@ -274,6 +274,7 @@ func (h *Handler) GetConfig(c *gin.Context) {
 	// 默认配置
 	defaults := map[string]interface{}{
 		"languages":                              append([]string(nil), constants.SupportedLocales...),
+		"default_locale":                         resolvePublicDefaultLocale(c),
 		constants.SettingFieldSiteCurrency:       constants.SiteCurrencyDefault,
 		constants.SettingFieldStorefrontTemplate: constants.StorefrontTemplateDefault,
 		"contact": map[string]interface{}{
@@ -395,6 +396,39 @@ func (h *Handler) GetConfig(c *gin.Context) {
 	data["server_time"] = time.Now().UnixMilli()
 	data["app_version"] = version.Version
 	response.Success(c, data)
+}
+
+func resolvePublicDefaultLocale(c *gin.Context) string {
+	if c == nil {
+		return constants.LocaleZhCN
+	}
+
+	for _, header := range []string{
+		"CF-IPCountry",
+		"CloudFront-Viewer-Country",
+		"X-Vercel-IP-Country",
+		"X-Country-Code",
+	} {
+		if locale := localeFromCountryCode(c.GetHeader(header)); locale != "" {
+			return locale
+		}
+	}
+
+	return i18n.ResolveLocale(c)
+}
+
+func localeFromCountryCode(country string) string {
+	code := strings.ToUpper(strings.TrimSpace(country))
+	switch code {
+	case "CN":
+		return constants.LocaleZhCN
+	case "HK", "MO", "TW":
+		return constants.LocaleZhTW
+	case "US", "GB", "CA", "AU", "NZ", "IE", "SG":
+		return constants.LocaleEnUS
+	default:
+		return ""
+	}
 }
 
 // GetPublicMemberLevels 获取公共会员等级列表
@@ -1307,10 +1341,51 @@ func (h *Handler) GetGuestOrderByOrderNo(c *gin.Context) {
 		shared.RespondError(c, response.CodeInternal, "error.order_fetch_failed", err)
 		return
 	}
-	orderDetail := dto.NewOrderDetailTruncated(order)
-	h.enrichOrderWithAllowedChannels(order, &orderDetail)
-	h.enrichOrderWithRefundRecords(order, &orderDetail)
-	response.Success(c, orderDetail)
+	response.Success(c, h.orderDetailResponse(order))
+}
+
+// RetryGuestOrderFulfillment 重新提交临时未完成的交付请求（游客）
+func (h *Handler) RetryGuestOrderFulfillment(c *gin.Context) {
+	email := strings.TrimSpace(c.Query("email"))
+	password := strings.TrimSpace(c.Query("order_password"))
+	if email == "" {
+		shared.RespondError(c, response.CodeBadRequest, "error.guest_email_required", nil)
+		return
+	}
+	if password == "" {
+		shared.RespondError(c, response.CodeBadRequest, "error.guest_password_required", nil)
+		return
+	}
+	orderNo := strings.TrimSpace(c.Param("order_no"))
+	if orderNo == "" {
+		shared.RespondError(c, response.CodeBadRequest, "error.order_item_invalid", nil)
+		return
+	}
+	tenant := tenantFromRequest(c)
+	order, err := h.OrderService.GetOrderByGuestOrderNoForTenant(tenant, orderNo, email, password)
+	if err != nil {
+		if errors.Is(err, service.ErrGuestOrderNotFound) {
+			shared.RespondError(c, response.CodeNotFound, "error.guest_order_not_found", nil)
+			return
+		}
+		shared.RespondError(c, response.CodeInternal, "error.order_fetch_failed", err)
+		return
+	}
+	if err := h.retryFulfillmentForOrder(order); err != nil {
+		if errors.Is(err, service.ErrProcurementNotFound) || errors.Is(err, service.ErrProcurementRetryDenied) {
+			shared.RespondError(c, response.CodeBadRequest, "error.order_item_invalid", nil)
+			return
+		}
+		shared.RespondError(c, response.CodeInternal, "error.order_update_failed", err)
+		return
+	}
+
+	refreshed, err := h.OrderService.GetOrderByGuestOrderNoForTenant(tenant, orderNo, email, password)
+	if err != nil {
+		shared.RespondError(c, response.CodeInternal, "error.order_fetch_failed", err)
+		return
+	}
+	response.Success(c, h.orderDetailResponse(refreshed))
 }
 
 // DownloadGuestFulfillment 下载订单交付内容（游客）

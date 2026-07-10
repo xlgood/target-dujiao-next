@@ -124,10 +124,16 @@ func TestSitemapServiceIncludesActiveContent(t *testing.T) {
 		"<urlset",
 		"https://example.com/",
 		"https://example.com/products",
+		"https://example.com/zh-CN/products",
+		"https://example.com/zh-TW/products",
+		"https://example.com/en/products",
 		"https://example.com/blog",
 		"https://example.com/categories/games",
+		"https://example.com/en/categories/games",
 		"https://example.com/products/visible-product",
+		"https://example.com/zh-CN/products/visible-product",
 		"https://example.com/blog/hello",
+		"https://example.com/zh-TW/blog/hello",
 	}
 	for _, s := range mustContain {
 		if !strings.Contains(xmlStr, s) {

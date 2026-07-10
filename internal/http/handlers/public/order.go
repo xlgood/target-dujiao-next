@@ -95,6 +95,78 @@ func (h *Handler) enrichOrderWithRefundRecords(order *models.Order, detail *dto.
 	}
 }
 
+// enrichOrderWithFulfillmentErrors adds user-safe fulfillment error codes.
+func (h *Handler) enrichOrderWithFulfillmentErrors(detail *dto.OrderDetail) {
+	if h == nil || detail == nil || h.ProcurementOrderService == nil {
+		return
+	}
+	apply := func(target *dto.OrderDetail) {
+		if target == nil || strings.TrimSpace(target.OrderNo) == "" {
+			return
+		}
+		proc, err := h.ProcurementOrderService.GetByLocalOrderNo(target.OrderNo)
+		if err != nil || proc == nil {
+			return
+		}
+		status := strings.ToLower(strings.TrimSpace(proc.Status))
+		if status != constants.ProcurementStatusFailed && status != constants.ProcurementStatusRejected {
+			return
+		}
+		if msg := strings.TrimSpace(proc.ErrorMessage); msg != "" {
+			target.FulfillmentError = msg
+			target.FulfillmentRetryable = h.ProcurementOrderService.IsUserRetryableTemporaryFailure(proc)
+		}
+	}
+	apply(detail)
+	for i := range detail.Children {
+		apply(&detail.Children[i])
+	}
+	if strings.TrimSpace(detail.FulfillmentError) == "" {
+		for i := range detail.Children {
+			if strings.TrimSpace(detail.Children[i].FulfillmentError) == "" {
+				continue
+			}
+			detail.FulfillmentError = detail.Children[i].FulfillmentError
+			detail.FulfillmentRetryable = detail.Children[i].FulfillmentRetryable
+			break
+		}
+	}
+}
+
+func (h *Handler) orderDetailResponse(order *models.Order) dto.OrderDetail {
+	orderDetail := dto.NewOrderDetailTruncated(order)
+	h.enrichOrderWithAllowedChannels(order, &orderDetail)
+	h.enrichOrderWithRefundRecords(order, &orderDetail)
+	h.enrichOrderWithFulfillmentErrors(&orderDetail)
+	return orderDetail
+}
+
+func (h *Handler) retryFulfillmentForOrder(order *models.Order) error {
+	if h == nil || h.ProcurementOrderService == nil || order == nil {
+		return service.ErrProcurementNotFound
+	}
+	orderNos := make([]string, 0, 1+len(order.Children))
+	if no := strings.TrimSpace(order.OrderNo); no != "" {
+		orderNos = append(orderNos, no)
+	}
+	for i := range order.Children {
+		if no := strings.TrimSpace(order.Children[i].OrderNo); no != "" {
+			orderNos = append(orderNos, no)
+		}
+	}
+	for _, orderNo := range orderNos {
+		proc, err := h.ProcurementOrderService.GetByLocalOrderNo(orderNo)
+		if err != nil {
+			return err
+		}
+		if !h.ProcurementOrderService.IsUserRetryableTemporaryFailure(proc) {
+			continue
+		}
+		return h.ProcurementOrderService.RetryUserTemporaryFailure(proc.ID)
+	}
+	return service.ErrProcurementRetryDenied
+}
+
 // OrderItemRequest 订单项请求
 type OrderItemRequest struct {
 	ProductID       uint   `json:"product_id" binding:"required"`
@@ -481,10 +553,48 @@ func (h *Handler) GetOrderByOrderNo(c *gin.Context) {
 		return
 	}
 
-	orderDetail := dto.NewOrderDetailTruncated(order)
-	h.enrichOrderWithAllowedChannels(order, &orderDetail)
-	h.enrichOrderWithRefundRecords(order, &orderDetail)
-	response.Success(c, orderDetail)
+	response.Success(c, h.orderDetailResponse(order))
+}
+
+// RetryOrderFulfillment 重新提交临时未完成的交付请求（登录用户）
+func (h *Handler) RetryOrderFulfillment(c *gin.Context) {
+	uid, ok := shared.GetUserID(c)
+	if !ok {
+		return
+	}
+
+	orderNo := strings.TrimSpace(c.Param("order_no"))
+	if orderNo == "" {
+		shared.RespondError(c, response.CodeBadRequest, "error.order_item_invalid", nil)
+		return
+	}
+
+	tenant := tenantFromRequest(c)
+	order, err := h.OrderService.GetOrderByUserOrderNoForTenant(tenant, orderNo, uid)
+	if err != nil {
+		if errors.Is(err, service.ErrOrderNotFound) {
+			shared.RespondError(c, response.CodeNotFound, "error.order_not_found", nil)
+			return
+		}
+		shared.RespondError(c, response.CodeInternal, "error.order_fetch_failed", err)
+		return
+	}
+
+	if err := h.retryFulfillmentForOrder(order); err != nil {
+		if errors.Is(err, service.ErrProcurementNotFound) || errors.Is(err, service.ErrProcurementRetryDenied) {
+			shared.RespondError(c, response.CodeBadRequest, "error.order_item_invalid", nil)
+			return
+		}
+		shared.RespondError(c, response.CodeInternal, "error.order_update_failed", err)
+		return
+	}
+
+	refreshed, err := h.OrderService.GetOrderByUserOrderNoForTenant(tenant, orderNo, uid)
+	if err != nil {
+		shared.RespondError(c, response.CodeInternal, "error.order_fetch_failed", err)
+		return
+	}
+	response.Success(c, h.orderDetailResponse(refreshed))
 }
 
 // CancelOrder 用户取消订单

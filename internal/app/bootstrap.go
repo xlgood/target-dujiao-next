@@ -23,7 +23,7 @@ func BuildRunner(cfg *config.Config, mode string) (*Runner, error) {
 	if mode == ModeAll || mode == ModeAPI {
 		engine := router.SetupRouter(cfg, container)
 		addr := cfg.Server.Host + ":" + cfg.Server.Port
-		httpService := NewHTTPService(addr, engine)
+		httpService := NewHTTPService(addr, engine, cfg.Server)
 		services = append(services, httpService)
 	}
 

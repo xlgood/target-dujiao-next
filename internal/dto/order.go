@@ -78,6 +78,8 @@ type OrderDetail struct {
 	CreatedAt                time.Time         `json:"created_at"`
 	AllowedPaymentChannelIDs []uint            `json:"allowed_payment_channel_ids,omitempty"`
 	RefundRecords            []OrderRefundResp `json:"refund_records,omitempty"`
+	FulfillmentError         string            `json:"fulfillment_error,omitempty"`
+	FulfillmentRetryable     bool              `json:"fulfillment_retryable,omitempty"`
 	Items                    []OrderItemResp   `json:"items,omitempty"`
 	Fulfillment              *FulfillmentResp  `json:"fulfillment,omitempty"`
 	Children                 []OrderDetail     `json:"children,omitempty"`

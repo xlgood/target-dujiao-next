@@ -8,6 +8,11 @@ server:
   host: 0.0.0.0
   port: 8080
   mode: debug  # debug 或 release
+  read_header_timeout_seconds: 5
+  read_timeout_seconds: 30
+  write_timeout_seconds: 60
+  idle_timeout_seconds: 120
+  max_header_bytes: 1048576  # 1MB
 
 log:
   dir: ""  # 为空时使用当前运行目录/logs

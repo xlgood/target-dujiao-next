@@ -4,6 +4,9 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"time"
+
+	"github.com/dujiao-next/internal/config"
 )
 
 // HTTPService HTTP 服务封装
@@ -13,14 +16,33 @@ type HTTPService struct {
 }
 
 // NewHTTPService 创建 HTTP 服务
-func NewHTTPService(addr string, handler http.Handler) *HTTPService {
+func NewHTTPService(addr string, handler http.Handler, cfg config.ServerConfig) *HTTPService {
 	return &HTTPService{
 		name: "http",
 		server: &http.Server{
-			Addr:    addr,
-			Handler: handler,
+			Addr:              addr,
+			Handler:           handler,
+			ReadHeaderTimeout: secondsDuration(cfg.ReadHeaderTimeoutSeconds),
+			ReadTimeout:       secondsDuration(cfg.ReadTimeoutSeconds),
+			WriteTimeout:      secondsDuration(cfg.WriteTimeoutSeconds),
+			IdleTimeout:       secondsDuration(cfg.IdleTimeoutSeconds),
+			MaxHeaderBytes:    maxHeaderBytes(cfg.MaxHeaderBytes),
 		},
 	}
+}
+
+func secondsDuration(seconds int) time.Duration {
+	if seconds <= 0 {
+		return 0
+	}
+	return time.Duration(seconds) * time.Second
+}
+
+func maxHeaderBytes(value int) int {
+	if value <= 0 {
+		return http.DefaultMaxHeaderBytes
+	}
+	return value
 }
 
 // Name 服务名称

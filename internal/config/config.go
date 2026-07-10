@@ -41,9 +41,14 @@ type AppConfig struct {
 
 // ServerConfig 服务器配置
 type ServerConfig struct {
-	Host string `mapstructure:"host"`
-	Port string `mapstructure:"port"`
-	Mode string `mapstructure:"mode"` // debug / release
+	Host                     string `mapstructure:"host"`
+	Port                     string `mapstructure:"port"`
+	Mode                     string `mapstructure:"mode"` // debug / release
+	ReadHeaderTimeoutSeconds int    `mapstructure:"read_header_timeout_seconds"`
+	ReadTimeoutSeconds       int    `mapstructure:"read_timeout_seconds"`
+	WriteTimeoutSeconds      int    `mapstructure:"write_timeout_seconds"`
+	IdleTimeoutSeconds       int    `mapstructure:"idle_timeout_seconds"`
+	MaxHeaderBytes           int    `mapstructure:"max_header_bytes"`
 }
 
 // LogConfig 日志配置
@@ -223,6 +228,7 @@ var (
 		"Cache-Control",
 		"X-Requested-With",
 		"X-CSRF-Token",
+		"X-Lang",
 	}
 )
 
@@ -297,6 +303,11 @@ func Load() *Config {
 	viper.SetDefault("server.host", "0.0.0.0")
 	viper.SetDefault("server.port", "8080")
 	viper.SetDefault("server.mode", "debug")
+	viper.SetDefault("server.read_header_timeout_seconds", 5)
+	viper.SetDefault("server.read_timeout_seconds", 30)
+	viper.SetDefault("server.write_timeout_seconds", 60)
+	viper.SetDefault("server.idle_timeout_seconds", 120)
+	viper.SetDefault("server.max_header_bytes", 1048576)
 	viper.SetDefault("log.dir", "")
 	viper.SetDefault("log.filename", "app.log")
 	viper.SetDefault("log.max_size_mb", 100)

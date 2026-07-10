@@ -153,6 +153,7 @@ func AutoMigrate() error {
 		&SiteConnection{},
 		&ProductMapping{},
 		&SKUMapping{},
+		&ProviderCatalogSyncRun{},
 		&ProcurementOrder{},
 		&DownstreamOrderRef{},
 		&ReconciliationJob{},

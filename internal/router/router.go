@@ -102,8 +102,9 @@ func SetupRouter(cfg *config.Config, c *provider.Container) *gin.Engine {
 			public.GET("/post-categories", publicHandler.GetPostCategories)
 		}
 
-		// 游客接口
+		// 游客只能浏览公开商品；下单、支付和查单均要求登录。
 		guest := storefront.Group("/guest")
+		guest.Use(RequireUserLoginMiddleware())
 		{
 			guest.POST("/orders", publicHandler.CreateGuestOrder)
 			guest.POST("/orders/create-and-pay", publicHandler.CreateGuestOrderAndPay)
@@ -111,6 +112,7 @@ func SetupRouter(cfg *config.Config, c *provider.Container) *gin.Engine {
 			guest.GET("/orders", publicHandler.ListGuestOrders)
 			guest.GET("/orders/:order_no", publicHandler.GetGuestOrderByOrderNo)
 			guest.GET("/orders/:order_no/fulfillment/download", publicHandler.DownloadGuestFulfillment)
+			guest.POST("/orders/:order_no/fulfillment/retry", publicHandler.RetryGuestOrderFulfillment)
 			guest.POST("/payments", publicHandler.CreateGuestPayment)
 			guest.POST("/payments/:id/capture", publicHandler.CaptureGuestPayment)
 			guest.GET("/payments/latest", publicHandler.GetGuestLatestPayment)
@@ -162,6 +164,7 @@ func SetupRouter(cfg *config.Config, c *provider.Container) *gin.Engine {
 			user.GET("/orders/stats", publicHandler.OrderStats)
 			user.GET("/orders/:order_no", publicHandler.GetOrderByOrderNo)
 			user.GET("/orders/:order_no/fulfillment/download", publicHandler.DownloadFulfillment)
+			user.POST("/orders/:order_no/fulfillment/retry", publicHandler.RetryOrderFulfillment)
 			user.POST("/orders/:order_no/cancel", publicHandler.CancelOrder)
 			user.POST("/payments", publicHandler.CreatePayment)
 			user.POST("/payments/:id/capture", publicHandler.CapturePayment)
@@ -536,6 +539,9 @@ func SetupRouter(cfg *config.Config, c *provider.Container) *gin.Engine {
 				authorized.PUT("/site-connections/:id/status", adminHandler.UpdateSiteConnectionStatus)
 				authorized.POST("/site-connections/:id/reapply-markup", adminHandler.ReapplyConnectionMarkup)
 
+				// Provider 商品目录同步
+				authorized.POST("/provider-catalog/sync", adminHandler.SyncProviderCatalog)
+
 				// 商品映射管理
 				authorized.GET("/product-mappings", adminHandler.GetProductMappings)
 				authorized.GET("/product-mappings/:id", adminHandler.GetProductMapping)
@@ -557,6 +563,7 @@ func SetupRouter(cfg *config.Config, c *provider.Container) *gin.Engine {
 				authorized.GET("/procurement-orders/:id", adminHandler.GetProcurementOrder)
 				authorized.GET("/procurement-orders/:id/upstream-payload/download", adminHandler.DownloadProcurementUpstreamPayload)
 				authorized.POST("/procurement-orders/:id/retry", adminHandler.RetryProcurementOrder)
+				authorized.POST("/procurement-orders/:id/sync-status", adminHandler.SyncProcurementOrderStatus)
 				authorized.POST("/procurement-orders/:id/cancel", adminHandler.CancelProcurementOrder)
 
 				// 对账管理

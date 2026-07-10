@@ -13,6 +13,7 @@ type ProductMappingRepository interface {
 	GetByID(id uint) (*models.ProductMapping, error)
 	GetByLocalProductID(productID uint) (*models.ProductMapping, error)
 	GetByConnectionAndUpstreamID(connectionID, upstreamProductID uint) (*models.ProductMapping, error)
+	GetByConnectionAndUpstreamCode(connectionID uint, upstreamProductCode string) (*models.ProductMapping, error)
 	WithTx(tx *gorm.DB) ProductMappingRepository
 	Create(mapping *models.ProductMapping) error
 	Update(mapping *models.ProductMapping) error
@@ -23,6 +24,8 @@ type ProductMappingRepository interface {
 	ListAllActive() ([]models.ProductMapping, error)
 	ListByLocalProductIDs(productIDs []uint) ([]models.ProductMapping, error)
 	ListUpstreamIDsByConnection(connectionID uint) ([]uint, error)
+	ListActiveByProvider(connectionID uint, provider string) ([]models.ProductMapping, error)
+	DeactivateMissingProviderCodes(connectionID uint, provider string, activeCodes []string) (int64, error)
 }
 
 // ProductMappingListFilter 映射列表筛选
@@ -73,6 +76,17 @@ func (r *GormProductMappingRepository) GetByLocalProductID(productID uint) (*mod
 func (r *GormProductMappingRepository) GetByConnectionAndUpstreamID(connectionID, upstreamProductID uint) (*models.ProductMapping, error) {
 	var m models.ProductMapping
 	if err := r.db.Where("connection_id = ? AND upstream_product_id = ?", connectionID, upstreamProductID).First(&m).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &m, nil
+}
+
+func (r *GormProductMappingRepository) GetByConnectionAndUpstreamCode(connectionID uint, upstreamProductCode string) (*models.ProductMapping, error) {
+	var m models.ProductMapping
+	if err := r.db.Where("connection_id = ? AND upstream_product_code = ?", connectionID, upstreamProductCode).First(&m).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, nil
 		}
@@ -180,4 +194,25 @@ func (r *GormProductMappingRepository) ListUpstreamIDsByConnection(connectionID 
 		return nil, err
 	}
 	return ids, nil
+}
+
+func (r *GormProductMappingRepository) ListActiveByProvider(connectionID uint, provider string) ([]models.ProductMapping, error) {
+	var mappings []models.ProductMapping
+	if err := r.db.Where("connection_id = ? AND provider = ? AND is_active = ?", connectionID, provider, true).Find(&mappings).Error; err != nil {
+		return nil, err
+	}
+	return mappings, nil
+}
+
+func (r *GormProductMappingRepository) DeactivateMissingProviderCodes(connectionID uint, provider string, activeCodes []string) (int64, error) {
+	query := r.db.Model(&models.ProductMapping{}).
+		Where("connection_id = ? AND provider = ? AND is_active = ?", connectionID, provider, true)
+	if len(activeCodes) > 0 {
+		query = query.Where("upstream_product_code NOT IN ?", activeCodes)
+	}
+	result := query.Updates(map[string]interface{}{
+		"is_active":       false,
+		"upstream_status": models.UpstreamStatusInactive,
+	})
+	return result.RowsAffected, result.Error
 }

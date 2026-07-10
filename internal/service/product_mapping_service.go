@@ -34,6 +34,7 @@ type ProductMappingService struct {
 	categoryService *CategoryService
 	mediaService    *MediaService
 	settingService  *SettingService
+	syncRunRepo     repository.ProviderCatalogSyncRunRepository
 }
 
 // NewProductMappingService 创建商品映射服务
@@ -68,6 +69,10 @@ func (s *ProductMappingService) SetMediaService(ms *MediaService) {
 // SetSettingService 注入设置服务（用于读取上游同步动态配置）
 func (s *ProductMappingService) SetSettingService(ss *SettingService) {
 	s.settingService = ss
+}
+
+func (s *ProductMappingService) SetProviderCatalogSyncRunRepository(repo repository.ProviderCatalogSyncRunRepository) {
+	s.syncRunRepo = repo
 }
 
 // GetByID 获取映射详情

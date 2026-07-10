@@ -385,6 +385,8 @@ const (
 // 对接协议类型常量
 const (
 	ConnectionProtocolDujiaoNext = "dujiao-next"
+	ConnectionProtocolFansGurus  = "fansgurus"
+	ConnectionProtocolTGXAccount = "tgx-account"
 )
 
 // API 凭证状态常量

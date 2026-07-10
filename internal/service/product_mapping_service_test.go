@@ -32,6 +32,9 @@ func (r *failingSKUMappingRepo) GetByLocalSKUID(skuID uint) (*models.SKUMapping,
 func (r *failingSKUMappingRepo) GetByMappingAndUpstreamSKUID(productMappingID, upstreamSKUID uint) (*models.SKUMapping, error) {
 	return nil, nil
 }
+func (r *failingSKUMappingRepo) GetByMappingAndUpstreamSKUCode(productMappingID uint, upstreamSKUCode string) (*models.SKUMapping, error) {
+	return nil, nil
+}
 
 func (r *failingSKUMappingRepo) ListByProductMapping(productMappingID uint) ([]models.SKUMapping, error) {
 	return nil, nil

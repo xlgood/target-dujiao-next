@@ -28,6 +28,16 @@ const adminIsSuperContextKey = "admin_is_super"
 const authHeaderKey = "Authorization"
 const authSchemeBearer = "Bearer"
 
+// RequireUserLoginMiddleware disables guest order/payment/query endpoints for
+// storefronts that require an account before any order action.
+func RequireUserLoginMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		msg := i18n.T(i18n.ResolveLocale(c), "error.unauthorized")
+		response.ErrorWithHTTPStatus(c, http.StatusUnauthorized, response.CodeUnauthorized, msg)
+		c.Abort()
+	}
+}
+
 // CORSMiddleware 跨域中间件
 func CORSMiddleware(cfg config.CORSConfig) gin.HandlerFunc {
 	allowedOrigins := cfg.AllowedOrigins
@@ -42,6 +52,7 @@ func CORSMiddleware(cfg config.CORSConfig) gin.HandlerFunc {
 	if len(allowedHeaders) == 0 {
 		allowedHeaders = config.DefaultCORSAllowedHeaders()
 	}
+	allowedHeaders = ensureCORSHeaders(allowedHeaders, "X-Lang")
 	methodsHeader := strings.Join(allowedMethods, ", ")
 	headersHeader := strings.Join(allowedHeaders, ", ")
 
@@ -70,6 +81,23 @@ func CORSMiddleware(cfg config.CORSConfig) gin.HandlerFunc {
 
 		c.Next()
 	}
+}
+
+func ensureCORSHeaders(headers []string, required ...string) []string {
+	result := append([]string(nil), headers...)
+	for _, item := range required {
+		exists := false
+		for _, header := range result {
+			if strings.EqualFold(strings.TrimSpace(header), item) {
+				exists = true
+				break
+			}
+		}
+		if !exists {
+			result = append(result, item)
+		}
+	}
+	return result
 }
 
 func resolveAllowedOrigin(origin string, allowedOrigins []string, allowCredentials bool) string {
