@@ -61,6 +61,7 @@ func (h *Handler) GetCart(c *gin.Context) {
 			Slug:                item.Product.Slug,
 			Title:               item.Product.TitleJSON,
 			PriceAmount:         item.Product.PriceAmount,
+			PriceQuantityBasis:  service.NormalizePriceQuantityBasis(item.Product.PriceQuantityBasis),
 			Images:              item.Product.Images,
 			Tags:                item.Product.Tags,
 			PurchaseType:        item.Product.PurchaseType,
@@ -70,14 +71,15 @@ func (h *Handler) GetCart(c *gin.Context) {
 			IsActive:            item.Product.IsActive,
 		}
 		respItems = append(respItems, dto.CartItemResp{
-			ProductID:       item.ProductID,
-			SKUID:           item.SKUID,
-			Quantity:        item.Quantity,
-			FulfillmentType: cartFT,
-			UnitPrice:       item.UnitPrice,
-			OriginalPrice:   item.OriginalPrice,
-			Currency:        item.Currency,
-			Product:         product,
+			ProductID:          item.ProductID,
+			SKUID:              item.SKUID,
+			Quantity:           item.Quantity,
+			FulfillmentType:    cartFT,
+			UnitPrice:          item.UnitPrice,
+			OriginalPrice:      item.OriginalPrice,
+			PriceQuantityBasis: item.PriceQuantityBasis,
+			Currency:           item.Currency,
+			Product:            product,
 		})
 	}
 

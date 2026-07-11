@@ -70,6 +70,7 @@ func (v *publicProductView) toProductResp() dto.ProductResp {
 			SKUCode:              sv.SKUCode,
 			SpecValues:           sv.SpecValuesJSON,
 			PriceAmount:          sv.PriceAmount,
+			PriceQuantityBasis:   service.SKUPriceQuantityBasis(v.Product.PriceQuantityBasis, sv.PriceQuantityBasis),
 			ManualStockTotal:     maskPublicStockInt(mode, sv.ManualStockTotal),
 			ManualStockSold:      maskPublicStockSold(mode, sv.ManualStockSold),
 			AutoStockAvailable:   maskPublicStockInt64(mode, sv.AutoStockAvailable),
@@ -87,6 +88,11 @@ func (v *publicProductView) toProductResp() dto.ProductResp {
 		})
 	}
 
+	wholesalePrices := []dto.WholesalePriceResp(nil)
+	if service.NormalizePriceQuantityBasis(v.Product.PriceQuantityBasis) == 1 {
+		wholesalePrices = dto.NewWholesalePriceRespList(v.Product.WholesalePrices)
+	}
+
 	resp := dto.ProductResp{
 		ID:                   v.Product.ID,
 		CategoryID:           v.Product.CategoryID,
@@ -96,7 +102,8 @@ func (v *publicProductView) toProductResp() dto.ProductResp {
 		Description:          v.Product.DescriptionJSON,
 		Content:              v.Product.ContentJSON,
 		PriceAmount:          v.Product.PriceAmount,
-		WholesalePrices:      dto.NewWholesalePriceRespList(v.Product.WholesalePrices),
+		PriceQuantityBasis:   service.NormalizePriceQuantityBasis(v.Product.PriceQuantityBasis),
+		WholesalePrices:      wholesalePrices,
 		Images:               v.Product.Images,
 		Tags:                 v.Product.Tags,
 		PurchaseType:         v.Product.PurchaseType,
@@ -603,8 +610,10 @@ func (h *Handler) decoratePublicProduct(product *models.Product, promotionServic
 	item.Product.PriceAmount = displayPrice
 	h.decorateProductStock(product, &item)
 
-	// 获取所有活动规则用于前端展示
-	if promotionService != nil {
+	productPriceQuantityBasis := service.NormalizePriceQuantityBasis(product.PriceQuantityBasis)
+
+	// 当前优惠规则均以“单件价格”建模，不能直接用于按千计价商品。
+	if promotionService != nil && productPriceQuantityBasis == 1 {
 		allRules, err := promotionService.GetProductPromotions(product.ID)
 		if err == nil && len(allRules) > 0 {
 			rules := make([]dto.PromotionRuleResp, 0, len(allRules))
@@ -626,7 +635,7 @@ func (h *Handler) decoratePublicProduct(product *models.Product, promotionServic
 	if len(userMemberLevelID) > 0 {
 		memberLevelID = userMemberLevelID[0]
 	}
-	if h.Container != nil && h.MemberLevelService != nil {
+	if productPriceQuantityBasis == 1 && h.Container != nil && h.MemberLevelService != nil {
 		levelPrices, _ := h.MemberLevelService.GetLevelPricesByProduct(product.ID)
 		if len(levelPrices) > 0 {
 			views := make([]dto.MemberLevelPrice, 0, len(levelPrices))
@@ -650,7 +659,8 @@ func (h *Handler) decoratePublicProduct(product *models.Product, promotionServic
 		sv := publicSKUView{ProductSKU: sku}
 
 		// 计算当前用户的会员价
-		if memberLevelID > 0 && h.Container != nil && h.MemberLevelService != nil && sku.IsActive {
+		skuPriceQuantityBasis := service.SKUPriceQuantityBasis(product.PriceQuantityBasis, sku.PriceQuantityBasis)
+		if skuPriceQuantityBasis == 1 && memberLevelID > 0 && h.Container != nil && h.MemberLevelService != nil && sku.IsActive {
 			memberPrice, _ := h.MemberLevelService.ResolveMemberPrice(memberLevelID, product.ID, sku.ID, sku.PriceAmount.Decimal)
 			if memberPrice.LessThan(sku.PriceAmount.Decimal) {
 				mp := models.NewMoneyFromDecimal(memberPrice)
@@ -658,7 +668,7 @@ func (h *Handler) decoratePublicProduct(product *models.Product, promotionServic
 			}
 		}
 
-		if promotionService != nil && sku.IsActive {
+		if skuPriceQuantityBasis == 1 && promotionService != nil && sku.IsActive {
 			priceCarrier := *product
 			priceCarrier.PriceAmount = sku.PriceAmount
 			promotion, discountedPrice, err := promotionService.ApplyPromotion(&priceCarrier, 1)

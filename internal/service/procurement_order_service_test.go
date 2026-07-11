@@ -2,6 +2,7 @@ package service
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -819,6 +820,34 @@ func TestSubmitToUpstream_Success(t *testing.T) {
 	}
 }
 
+func TestCreateForOrderRejectsInactiveMapping(t *testing.T) {
+	db := setupProcurementTestDB(t)
+	order := createProcTestOrder(t, db, "PROC-INACTIVE-MAPPING", constants.OrderStatusPaid, constants.FulfillmentTypeUpstream)
+	mapping := &models.ProductMapping{
+		ConnectionID:      1,
+		LocalProductID:    1,
+		UpstreamProductID: 101,
+		IsActive:          true,
+	}
+	if err := db.Create(mapping).Error; err != nil {
+		t.Fatalf("create mapping: %v", err)
+	}
+	if err := db.Model(&models.ProductMapping{}).Where("id = ?", mapping.ID).Update("is_active", false).Error; err != nil {
+		t.Fatalf("deactivate mapping: %v", err)
+	}
+	svc := newTestProcurementService(db, NewSiteConnectionService(repository.NewSiteConnectionRepository(db), "test-key", t.TempDir()))
+	if err := svc.CreateForOrder(order.ID); !errors.Is(err, ErrMappingInactive) {
+		t.Fatalf("expected ErrMappingInactive, got %v", err)
+	}
+	var count int64
+	if err := db.Model(&models.ProcurementOrder{}).Count(&count).Error; err != nil {
+		t.Fatalf("count procurement: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("expected no procurement order, got %d", count)
+	}
+}
+
 func TestSubmitToUpstream_NonRetryableError_Rejects(t *testing.T) {
 	db := setupProcurementTestDB(t)
 
@@ -1061,11 +1090,19 @@ func TestSubmitToUpstream_TGXProviderImmediateSecret(t *testing.T) {
 	db.Create(sm)
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/commodity/trade" {
-			t.Fatalf("path=%s, want /commodity/trade", r.URL.Path)
-		}
 		if err := r.ParseForm(); err != nil {
 			t.Fatalf("ParseForm: %v", err)
+		}
+		if r.URL.Path == "/commodity/inventory" {
+			_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "data": map[string]any{"stock": 5}})
+			return
+		}
+		if r.URL.Path == "/commodity/inventoryState" {
+			_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "data": map[string]any{"available": true, "quantity": 1}})
+			return
+		}
+		if r.URL.Path != "/commodity/trade" {
+			t.Fatalf("path=%s, want /commodity/trade", r.URL.Path)
 		}
 		if got := r.FormValue("app_id"); got != "tgx-app-id" {
 			t.Fatalf("app_id=%s, want tgx-app-id", got)
@@ -1149,6 +1186,10 @@ func TestSubmitToUpstream_TGXProviderRecoversByRequestNo(t *testing.T) {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
+		case "/commodity/inventory":
+			_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "data": map[string]any{"stock": 5}})
+		case "/commodity/inventoryState":
+			_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "data": map[string]any{"available": true, "quantity": 1}})
 		case "/commodity/trade":
 			tradeCalls++
 			if got := r.FormValue("request_no"); got != order.OrderNo {
@@ -1364,6 +1405,10 @@ func TestProviderFulfillmentEndToEnd_TGXMockDelayedSecret(t *testing.T) {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
+		case "/commodity/inventory":
+			_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "data": map[string]any{"stock": 5}})
+		case "/commodity/inventoryState":
+			_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "data": map[string]any{"available": true, "quantity": 1}})
 		case "/commodity/trade":
 			tradeCalls++
 			if got := r.FormValue("shared_code"); got != "IG-001" {

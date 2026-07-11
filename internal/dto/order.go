@@ -159,6 +159,7 @@ type OrderItemResp struct {
 	Quantity                 int                `json:"quantity"`
 	OriginalUnitPrice        models.Money       `json:"original_unit_price"`
 	UnitPrice                models.Money       `json:"unit_price"`
+	PriceQuantityBasis       int                `json:"price_quantity_basis"`
 	OriginalTotalPrice       models.Money       `json:"original_total_price"`
 	TotalPrice               models.Money       `json:"total_price"`
 	CouponDiscountAmount     models.Money       `json:"coupon_discount_amount"`
@@ -186,6 +187,7 @@ func newOrderItemResp(item *models.OrderItem) OrderItemResp {
 		Quantity:                 item.Quantity,
 		OriginalUnitPrice:        item.OriginalUnitPrice,
 		UnitPrice:                item.UnitPrice,
+		PriceQuantityBasis:       normalizedPriceQuantityBasis(item.PriceQuantityBasis),
 		OriginalTotalPrice:       item.OriginalTotalPrice,
 		TotalPrice:               item.TotalPrice,
 		CouponDiscountAmount:     item.CouponDiscount,
@@ -198,6 +200,13 @@ func newOrderItemResp(item *models.OrderItem) OrderItemResp {
 		Instructions:             item.InstructionsJSON,
 	}
 	// 注意：CostPrice 不在 DTO 中，白名单模式天然排除
+}
+
+func normalizedPriceQuantityBasis(basis int) int {
+	if basis <= 0 {
+		return 1
+	}
+	return basis
 }
 
 // FulfillmentResp 交付记录响应

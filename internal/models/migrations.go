@@ -105,6 +105,45 @@ func ensureOrderItemOriginalPriceMigration() error {
 	})
 }
 
+// ensureFansGurusPriceBasisMigration marks catalog rows imported before the
+// price_quantity_basis field existed as prices per 1000 units.
+func ensureFansGurusPriceBasisMigration() error {
+	if DB == nil {
+		return errors.New("database is not initialized")
+	}
+	var marker Setting
+	if err := DB.First(&marker, "key = ?", fansGurusPriceBasisMigrationSettingKey).Error; err != nil {
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return err
+		}
+	} else if migrationDone(marker.ValueJSON) {
+		return nil
+	}
+
+	return DB.Transaction(func(tx *gorm.DB) error {
+		mappedProductIDs := tx.Model(&ProductMapping{}).
+			Select("local_product_id").
+			Where("provider = ?", "fansgurus")
+		if err := tx.Model(&Product{}).
+			Where("id IN (?)", mappedProductIDs).
+			Update("price_quantity_basis", 1000).Error; err != nil {
+			return err
+		}
+		if err := tx.Model(&ProductSKU{}).
+			Where("product_id IN (?)", mappedProductIDs).
+			Update("price_quantity_basis", 1000).Error; err != nil {
+			return err
+		}
+		return tx.Save(&Setting{
+			Key: fansGurusPriceBasisMigrationSettingKey,
+			ValueJSON: JSON{
+				"done":        true,
+				"migrated_at": time.Now().UTC().Format(time.RFC3339),
+			},
+		}).Error
+	})
+}
+
 // migrateCartSKUUniqueIndex 迁移购物车唯一索引为 user_id + product_id + sku_id 维度。
 func migrateCartSKUUniqueIndex() error {
 	migrator := DB.Migrator()
@@ -173,7 +212,7 @@ func ensureProductSKUMigration() error {
 func ensureDefaultProductSKUs() error {
 	var products []Product
 	if err := DB.Unscoped().
-		Select("id, price_amount, manual_stock_total, manual_stock_locked, manual_stock_sold, is_active").
+		Select("id, price_amount, price_quantity_basis, manual_stock_total, manual_stock_locked, manual_stock_sold, is_active").
 		Find(&products).Error; err != nil {
 		return err
 	}
@@ -201,14 +240,15 @@ func ensureDefaultProductSKUs() error {
 			continue
 		}
 		createRows = append(createRows, ProductSKU{
-			ProductID:         product.ID,
-			SKUCode:           DefaultSKUCode,
-			SpecValuesJSON:    JSON{},
-			PriceAmount:       product.PriceAmount,
-			ManualStockTotal:  product.ManualStockTotal,
-			ManualStockLocked: product.ManualStockLocked,
-			ManualStockSold:   product.ManualStockSold,
-			IsActive:          product.IsActive,
+			ProductID:          product.ID,
+			SKUCode:            DefaultSKUCode,
+			SpecValuesJSON:     JSON{},
+			PriceAmount:        product.PriceAmount,
+			PriceQuantityBasis: product.PriceQuantityBasis,
+			ManualStockTotal:   product.ManualStockTotal,
+			ManualStockLocked:  product.ManualStockLocked,
+			ManualStockSold:    product.ManualStockSold,
+			IsActive:           product.IsActive,
 		})
 	}
 

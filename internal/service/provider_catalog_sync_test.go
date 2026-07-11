@@ -105,6 +105,40 @@ func TestSyncProviderCatalogWithClientsFiltersAndImports(t *testing.T) {
 	}
 }
 
+func TestSyncProviderCatalogWithClientsSkipsUnsupportedFansGurusTypes(t *testing.T) {
+	db := setupProviderCatalogImportDB(t)
+	svc := NewProductMappingService(
+		repository.NewProductMappingRepository(db),
+		repository.NewSKUMappingRepository(db),
+		repository.NewProductRepository(db),
+		repository.NewProductSKURepository(db),
+		repository.NewCategoryRepository(db),
+		nil,
+	)
+	result, err := svc.SyncProviderCatalogWithClients(
+		context.Background(),
+		ProviderCatalogSyncInput{FansGurusConnectionID: 101, TGXConnectionID: 202},
+		fakeFansGurusCatalogClient{services: []upstream.FansGurusService{
+			{Service: 1, Name: "Instagram Followers", Category: "Instagram", Type: "Default", Rate: "2.00"},
+			{Service: 2, Name: "Instagram Comments", Category: "Instagram", Type: "Custom Comments", Rate: "2.00"},
+		}},
+		fakeTGXCatalogClient{items: []upstream.TGXCommodity{{Code: "IG-001", Name: "Instagram Account", Price: "100.00"}}},
+	)
+	if err != nil {
+		t.Fatalf("SyncProviderCatalogWithClients: %v", err)
+	}
+	if result.Imported != 2 {
+		t.Fatalf("imported=%d, want 2", result.Imported)
+	}
+	var unsupported int64
+	if err := db.Model(&models.ProductMapping{}).Where("upstream_product_code = ?", "2").Count(&unsupported).Error; err != nil {
+		t.Fatalf("count unsupported mapping: %v", err)
+	}
+	if unsupported != 0 {
+		t.Fatalf("unsupported service was imported")
+	}
+}
+
 func TestSyncProviderCatalogWithClientsDeactivatesStaleMappings(t *testing.T) {
 	db := setupProviderCatalogImportDB(t)
 	mappingRepo := repository.NewProductMappingRepository(db)

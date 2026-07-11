@@ -17,6 +17,7 @@ type OrderItem struct {
 	Tags                         StringArray    `gorm:"type:json" json:"tags"`                                                  // 标签快照
 	OriginalUnitPrice            Money          `gorm:"type:decimal(20,2);not null;default:0" json:"original_unit_price"`       // 原始单价快照
 	UnitPrice                    Money          `gorm:"type:decimal(20,2);not null;default:0" json:"unit_price"`                // 单价
+	PriceQuantityBasis           int            `gorm:"not null;default:1" json:"price_quantity_basis"`                         // 单价对应数量快照
 	CostPrice                    Money          `gorm:"type:decimal(20,2);not null;default:0" json:"cost_price"`                // 成本价快照
 	Quantity                     int            `gorm:"not null" json:"quantity"`                                               // 数量
 	OriginalTotalPrice           Money          `gorm:"type:decimal(20,2);not null;default:0" json:"original_total_price"`      // 原始小计快照

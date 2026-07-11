@@ -54,21 +54,22 @@ var (
 )
 
 type ProviderCatalogItem struct {
-	Provider      string
-	Code          string
-	Name          string
-	Category      string
-	Description   string
-	Type          string
-	Tags          []string
-	RawText       []string
-	UpstreamPrice string
-	TargetPrice   string
-	MinQuantity   int
-	MaxQuantity   int
-	Variants      []ProviderCatalogVariant
-	ManualSchema  map[string]interface{}
-	Active        bool
+	Provider           string
+	Code               string
+	Name               string
+	Category           string
+	Description        string
+	Type               string
+	Tags               []string
+	RawText            []string
+	UpstreamPrice      string
+	TargetPrice        string
+	PriceQuantityBasis int
+	MinQuantity        int
+	MaxQuantity        int
+	Variants           []ProviderCatalogVariant
+	ManualSchema       map[string]interface{}
+	Active             bool
 }
 
 type ProviderCatalogVariant struct {
@@ -95,17 +96,26 @@ func NewFansGurusCatalogItem(service FansGurusService) (ProviderCatalogItem, err
 		return ProviderCatalogItem{}, err
 	}
 	return ProviderCatalogItem{
-		Provider:      CatalogProviderFansGurus,
-		Code:          uintToString(service.Service),
-		Name:          service.Name,
-		Category:      service.Category,
-		Type:          service.Type,
-		UpstreamPrice: service.Rate,
-		TargetPrice:   targetRate,
-		MinQuantity:   service.Min,
-		MaxQuantity:   service.Max,
-		Active:        true,
+		Provider:           CatalogProviderFansGurus,
+		Code:               uintToString(service.Service),
+		Name:               service.Name,
+		Category:           service.Category,
+		Type:               service.Type,
+		UpstreamPrice:      service.Rate,
+		TargetPrice:        targetRate,
+		PriceQuantityBasis: 1000,
+		MinQuantity:        service.Min,
+		MaxQuantity:        service.Max,
+		Active:             FansGurusServiceTypeSupported(service.Type),
 	}, nil
+}
+
+// FansGurusServiceTypeSupported is intentionally conservative: procurement
+// currently submits only link + quantity, which matches the Default service.
+// Other service types require additional user input and must not be sold yet.
+func FansGurusServiceTypeSupported(serviceType string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(serviceType))
+	return normalized == "" || normalized == "default"
 }
 
 func NewTGXCatalogItem(commodity TGXCommodity) (ProviderCatalogItem, error) {
@@ -119,17 +129,18 @@ func NewTGXCatalogItem(commodity TGXCommodity) (ProviderCatalogItem, error) {
 	}
 	manualSchema := ParseTGXWidgetManualSchema(commodity.Widget)
 	return ProviderCatalogItem{
-		Provider:      CatalogProviderTGX,
-		Code:          commodity.Code,
-		Name:          commodity.Name,
-		Description:   commodity.Description,
-		RawText:       []string{string(commodity.Config), string(commodity.Widget)},
-		UpstreamPrice: commodity.Price,
-		TargetPrice:   targetPrice,
-		MinQuantity:   commodity.Minimum,
-		Variants:      variants,
-		ManualSchema:  manualSchema,
-		Active:        true,
+		Provider:           CatalogProviderTGX,
+		Code:               commodity.Code,
+		Name:               commodity.Name,
+		Description:        commodity.Description,
+		RawText:            []string{string(commodity.Config), string(commodity.Widget)},
+		UpstreamPrice:      commodity.Price,
+		TargetPrice:        targetPrice,
+		PriceQuantityBasis: 1,
+		MinQuantity:        commodity.Minimum,
+		Variants:           variants,
+		ManualSchema:       manualSchema,
+		Active:             true,
 	}, nil
 }
 

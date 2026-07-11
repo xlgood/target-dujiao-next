@@ -137,6 +137,9 @@ func TestImportUpstreamProductRollbackWhenSKUMappingCreateFails(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create connection failed: %v", err)
 	}
+	if err := connService.SetStatus(conn.ID, constants.ConnectionStatusActive); err != nil {
+		t.Fatalf("activate connection failed: %v", err)
+	}
 
 	svc := NewProductMappingService(
 		repository.NewProductMappingRepository(db),
@@ -605,6 +608,24 @@ func TestEnsureUpstreamStockReturnsNilWhenCachedStockSufficient(t *testing.T) {
 	}
 	if callCount != 0 {
 		t.Fatalf("expected zero upstream calls when cache is sufficient, got %d", callCount)
+	}
+}
+
+func TestEnsureUpstreamStockRejectsInactiveMapping(t *testing.T) {
+	svc, db, mapping, cleanup := setupMappingWithUpstreamHandler(t,
+		"file:preorder_inactive_mapping?mode=memory&cache=shared",
+		func(w http.ResponseWriter, r *http.Request) { t.Fatal("inactive mapping must not call upstream") },
+	)
+	defer cleanup()
+	if err := db.Model(&models.ProductMapping{}).Where("id = ?", mapping.ID).Update("is_active", false).Error; err != nil {
+		t.Fatalf("deactivate mapping: %v", err)
+	}
+	var sku models.ProductSKU
+	if err := db.First(&sku).Error; err != nil {
+		t.Fatalf("load sku: %v", err)
+	}
+	if err := svc.EnsureUpstreamStockForOrder(sku.ID, 1); !errors.Is(err, ErrMappingInactive) {
+		t.Fatalf("expected ErrMappingInactive, got %v", err)
 	}
 }
 

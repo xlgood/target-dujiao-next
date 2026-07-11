@@ -117,6 +117,9 @@ func TestProviderCatalogItemPriceRules(t *testing.T) {
 	if fansItem.TargetPrice != "10.00000000" {
 		t.Fatalf("fans target=%s, want 10.00000000", fansItem.TargetPrice)
 	}
+	if fansItem.PriceQuantityBasis != 1000 {
+		t.Fatalf("fans price quantity basis=%d, want 1000", fansItem.PriceQuantityBasis)
+	}
 	if fansItem.MinQuantity != 500 || fansItem.MaxQuantity != 10000 {
 		t.Fatalf("fans quantity range=%d/%d", fansItem.MinQuantity, fansItem.MaxQuantity)
 	}
@@ -133,6 +136,25 @@ func TestProviderCatalogItemPriceRules(t *testing.T) {
 	}
 	if tgxItem.TargetPrice != "120.00000000" {
 		t.Fatalf("tgx target=%s, want 120.00000000", tgxItem.TargetPrice)
+	}
+	if tgxItem.PriceQuantityBasis != 1 {
+		t.Fatalf("tgx price quantity basis=%d, want 1", tgxItem.PriceQuantityBasis)
+	}
+}
+
+func TestNewFansGurusCatalogItemDisablesUnsupportedServiceTypes(t *testing.T) {
+	item, err := NewFansGurusCatalogItem(FansGurusService{
+		Service:  456,
+		Name:     "Instagram Custom Comments",
+		Category: "Instagram",
+		Type:     "Custom Comments",
+		Rate:     "2.00",
+	})
+	if err != nil {
+		t.Fatalf("NewFansGurusCatalogItem: %v", err)
+	}
+	if item.Active {
+		t.Fatalf("unsupported FansGurus type must not be imported: %+v", item)
 	}
 }
 

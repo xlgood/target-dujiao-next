@@ -104,13 +104,14 @@ func (s *OrderService) buildOrderResult(input orderCreateParams) (*orderBuildRes
 
 		productCurrency := currency
 		basePrice := sku.PriceAmount.Decimal.Round(2)
+		priceQuantityBasis := SKUPriceQuantityBasis(product.PriceQuantityBasis, sku.PriceQuantityBasis)
 
 		// 1. 计算活动价
 		priceCarrier := *product
 		priceCarrier.PriceAmount = sku.PriceAmount
 		var promotion *models.Promotion
 		promoUnitPriceAmount := basePrice
-		if promotionService != nil {
+		if promotionService != nil && priceQuantityBasis == 1 {
 			var promoUnitPrice models.Money
 			promotion, promoUnitPrice, err = promotionService.ApplyPromotion(&priceCarrier, item.Quantity)
 			if err != nil {
@@ -123,9 +124,7 @@ func (s *OrderService) buildOrderResult(input orderCreateParams) (*orderBuildRes
 		unitPriceAmount := promoUnitPriceAmount
 		promotionDiscount := decimal.Zero
 		if promotion != nil && basePrice.GreaterThan(promoUnitPriceAmount) {
-			promotionDiscount = basePrice.Sub(promoUnitPriceAmount).
-				Mul(decimal.NewFromInt(int64(item.Quantity))).
-				Round(2)
+			promotionDiscount = amountForQuantity(basePrice.Sub(promoUnitPriceAmount), item.Quantity, priceQuantityBasis)
 		}
 
 		wholesaleMatchQuantity := productQuantityTotals[item.ProductID]
@@ -135,7 +134,7 @@ func (s *OrderService) buildOrderResult(input orderCreateParams) (*orderBuildRes
 		var wholesaleUnitPrice decimal.Decimal
 		wholesaleDiscount := decimal.Zero
 		wholesaleMatched := false
-		if !resellerOrder {
+		if !resellerOrder && priceQuantityBasis == 1 {
 			wholesaleUnitPrice, wholesaleDiscount, wholesaleMatched = ResolveWholesaleUnitPriceForSKU(product, basePrice, sku.ID, sku.SKUCode, wholesaleMatchQuantity, item.Quantity)
 		}
 		if wholesaleMatched && wholesaleUnitPrice.LessThan(unitPriceAmount) {
@@ -152,12 +151,10 @@ func (s *OrderService) buildOrderResult(input orderCreateParams) (*orderBuildRes
 
 		// 3. 在已命中的商品级优惠单价基础上应用会员价。
 		itemMemberDiscount := decimal.Zero
-		if !resellerOrder && userMemberLevelID > 0 && s.memberLevelService != nil {
+		if !resellerOrder && priceQuantityBasis == 1 && userMemberLevelID > 0 && s.memberLevelService != nil {
 			memberUnitPrice, _ := s.memberLevelService.ResolveMemberPrice(userMemberLevelID, product.ID, sku.ID, unitPriceAmount)
 			if memberUnitPrice.LessThan(unitPriceAmount) {
-				itemMemberDiscount = unitPriceAmount.Sub(memberUnitPrice).
-					Mul(decimal.NewFromInt(int64(item.Quantity))).
-					Round(2)
+				itemMemberDiscount = amountForQuantity(unitPriceAmount.Sub(memberUnitPrice), item.Quantity, priceQuantityBasis)
 				memberDiscountAmount = memberDiscountAmount.Add(itemMemberDiscount).Round(2)
 				unitPriceAmount = memberUnitPrice
 			}
@@ -172,8 +169,8 @@ func (s *OrderService) buildOrderResult(input orderCreateParams) (*orderBuildRes
 			return nil, ErrProductPriceInvalid
 		}
 
-		baseTotal := basePrice.Mul(decimal.NewFromInt(int64(item.Quantity))).Round(2)
-		total := unitPriceAmount.Mul(decimal.NewFromInt(int64(item.Quantity))).Round(2)
+		baseTotal := amountForQuantity(basePrice, item.Quantity, priceQuantityBasis)
+		total := amountForQuantity(unitPriceAmount, item.Quantity, priceQuantityBasis)
 		originalAmount = originalAmount.Add(baseTotal).Round(2)
 		fulfillmentType := strings.TrimSpace(product.FulfillmentType)
 		if fulfillmentType == "" {
@@ -233,6 +230,7 @@ func (s *OrderService) buildOrderResult(input orderCreateParams) (*orderBuildRes
 			Tags:                         product.Tags,
 			OriginalUnitPrice:            models.NewMoneyFromDecimal(basePrice),
 			UnitPrice:                    models.NewMoneyFromDecimal(unitPriceAmount),
+			PriceQuantityBasis:           priceQuantityBasis,
 			CostPrice:                    sku.CostPriceAmount, // 成本价快照
 			Quantity:                     item.Quantity,
 			OriginalTotalPrice:           models.NewMoneyFromDecimal(baseTotal),

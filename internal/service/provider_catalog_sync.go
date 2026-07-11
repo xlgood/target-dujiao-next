@@ -110,24 +110,44 @@ func (s *ProductMappingService) SyncProviderCatalogWithClients(
 }
 
 func (s *ProductMappingService) deactivateStaleProviderCatalogMappings(input ProviderCatalogSyncInput, catalog upstream.FilteredCatalog) (int, error) {
-	total := int64(0)
+	total := 0
 	fansCodes := providerCatalogCodes(catalog.FansGurus)
 	tgxCodes := providerCatalogCodes(catalog.TGX)
-	if input.FansGurusConnectionID > 0 {
-		count, err := s.mappingRepo.DeactivateMissingProviderCodes(input.FansGurusConnectionID, upstream.CatalogProviderFansGurus, fansCodes)
+	for _, target := range []struct {
+		connectionID uint
+		provider     string
+		activeCodes  []string
+	}{
+		{input.FansGurusConnectionID, upstream.CatalogProviderFansGurus, fansCodes},
+		{input.TGXConnectionID, upstream.CatalogProviderTGX, tgxCodes},
+	} {
+		if target.connectionID == 0 {
+			continue
+		}
+		mappings, err := s.mappingRepo.ListActiveByProvider(target.connectionID, target.provider)
 		if err != nil {
 			return 0, err
 		}
-		total += count
-	}
-	if input.TGXConnectionID > 0 {
-		count, err := s.mappingRepo.DeactivateMissingProviderCodes(input.TGXConnectionID, upstream.CatalogProviderTGX, tgxCodes)
-		if err != nil {
-			return 0, err
+		active := make(map[string]struct{}, len(target.activeCodes))
+		for _, code := range target.activeCodes {
+			active[code] = struct{}{}
 		}
-		total += count
+		for i := range mappings {
+			if _, ok := active[mappings[i].UpstreamProductCode]; ok {
+				continue
+			}
+			mappings[i].IsActive = false
+			mappings[i].UpstreamStatus = models.UpstreamStatusInactive
+			if err := s.mappingRepo.Update(&mappings[i]); err != nil {
+				return 0, err
+			}
+			if err := s.deactivateMappedProduct(&mappings[i]); err != nil {
+				return 0, err
+			}
+			total++
+		}
 	}
-	return int(total), nil
+	return total, nil
 }
 
 func providerCatalogCodes(items []upstream.ProviderCatalogItem) []string {

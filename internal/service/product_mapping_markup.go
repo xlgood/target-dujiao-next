@@ -4,6 +4,9 @@ import (
 	"strconv"
 
 	"github.com/dujiao-next/internal/models"
+	"github.com/dujiao-next/internal/upstream"
+
+	"github.com/shopspring/decimal"
 )
 
 // ReapplyMarkup 对指定连接的所有映射商品重新应用加价规则
@@ -29,7 +32,7 @@ func (s *ProductMappingService) ReapplyMarkup(connectionID uint) (int, error) {
 		}
 
 		for _, sm := range skuMappings {
-			newLocalPrice := CalculateLocalPrice(sm.UpstreamPrice.Decimal, conn.ExchangeRate, conn.PriceMarkupPercent, conn.PriceRoundingMode)
+			newLocalPrice := providerMappingLocalPrice(mapping.Provider, sm.UpstreamPrice.Decimal, conn)
 			localSKU, err := s.productSKURepo.GetByID(sm.LocalSKUID)
 			if err != nil || localSKU == nil {
 				continue
@@ -48,6 +51,29 @@ func (s *ProductMappingService) ReapplyMarkup(connectionID uint) (int, error) {
 	}
 
 	return updated, nil
+}
+
+func providerMappingLocalPrice(provider string, upstreamPrice decimal.Decimal, conn *models.SiteConnection) decimal.Decimal {
+	switch provider {
+	case upstream.CatalogProviderFansGurus:
+		price, err := upstream.FansGurusTargetRate(upstreamPrice.String())
+		if err == nil {
+			if parsed, parseErr := decimal.NewFromString(price); parseErr == nil {
+				return parsed
+			}
+		}
+	case upstream.CatalogProviderTGX:
+		price, err := upstream.TGXTargetPrice(upstreamPrice.String())
+		if err == nil {
+			if parsed, parseErr := decimal.NewFromString(price); parseErr == nil {
+				return parsed
+			}
+		}
+	}
+	if conn == nil {
+		return upstreamPrice
+	}
+	return CalculateLocalPrice(upstreamPrice, conn.ExchangeRate, conn.PriceMarkupPercent, conn.PriceRoundingMode)
 }
 
 // recalcProductPrice 重新计算商品基准价格和成本价为最低活跃 SKU 价格

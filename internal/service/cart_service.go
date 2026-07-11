@@ -12,15 +12,16 @@ import (
 
 // CartItemDetail 购物车项详情（用于响应）
 type CartItemDetail struct {
-	ProductID       uint               `json:"product_id"`
-	SKUID           uint               `json:"sku_id"`
-	Quantity        int                `json:"quantity"`
-	FulfillmentType string             `json:"fulfillment_type"`
-	UnitPrice       models.Money       `json:"unit_price"`
-	OriginalPrice   models.Money       `json:"original_price"`
-	Currency        string             `json:"currency"`
-	Product         *models.Product    `json:"product"`
-	SKU             *models.ProductSKU `json:"sku"`
+	ProductID          uint               `json:"product_id"`
+	SKUID              uint               `json:"sku_id"`
+	Quantity           int                `json:"quantity"`
+	FulfillmentType    string             `json:"fulfillment_type"`
+	UnitPrice          models.Money       `json:"unit_price"`
+	OriginalPrice      models.Money       `json:"original_price"`
+	PriceQuantityBasis int                `json:"price_quantity_basis"`
+	Currency           string             `json:"currency"`
+	Product            *models.Product    `json:"product"`
+	SKU                *models.ProductSKU `json:"sku"`
 }
 
 // UpsertCartItemInput 购物车更新输入
@@ -102,7 +103,7 @@ func (s *CartService) ListByUser(userID uint) ([]CartItemDetail, error) {
 		priceCarrier := *product
 		priceCarrier.PriceAmount = sku.PriceAmount
 		unitPrice := sku.PriceAmount
-		if promotionService != nil {
+		if promotionService != nil && SKUPriceQuantityBasis(product.PriceQuantityBasis, sku.PriceQuantityBasis) == 1 {
 			_, discounted, err := promotionService.ApplyPromotion(&priceCarrier, item.Quantity)
 			if err != nil {
 				return nil, err
@@ -116,15 +117,16 @@ func (s *CartService) ListByUser(userID uint) ([]CartItemDetail, error) {
 		}
 
 		details = append(details, CartItemDetail{
-			ProductID:       item.ProductID,
-			SKUID:           sku.ID,
-			Quantity:        item.Quantity,
-			FulfillmentType: fulfillmentType,
-			UnitPrice:       unitPrice,
-			OriginalPrice:   sku.PriceAmount,
-			Currency:        currency,
-			Product:         product,
-			SKU:             sku,
+			ProductID:          item.ProductID,
+			SKUID:              sku.ID,
+			Quantity:           item.Quantity,
+			FulfillmentType:    fulfillmentType,
+			UnitPrice:          unitPrice,
+			OriginalPrice:      sku.PriceAmount,
+			PriceQuantityBasis: SKUPriceQuantityBasis(product.PriceQuantityBasis, sku.PriceQuantityBasis),
+			Currency:           currency,
+			Product:            product,
+			SKU:                sku,
 		})
 	}
 	return details, nil

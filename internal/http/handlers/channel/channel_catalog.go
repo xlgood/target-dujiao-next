@@ -116,6 +116,13 @@ func normalizeChannelWholesalePrices(tiers models.WholesalePriceTiers) []channel
 	return items
 }
 
+func channelWholesalePricesForBasis(tiers models.WholesalePriceTiers, basis int) []channelWholesalePrice {
+	if service.NormalizePriceQuantityBasis(basis) != 1 {
+		return nil
+	}
+	return normalizeChannelWholesalePrices(tiers)
+}
+
 // GetProducts GET /api/v1/channel/catalog/products?locale=zh-CN&category_id=1&page=1&page_size=5
 func (h *Handler) GetProducts(c *gin.Context) {
 	locale := c.DefaultQuery("locale", "zh-CN")
@@ -168,6 +175,7 @@ func (h *Handler) GetProducts(c *gin.Context) {
 		Summary             string                  `json:"summary"`
 		ImageURL            string                  `json:"image_url"`
 		PriceFrom           string                  `json:"price_from"`
+		PriceQuantityBasis  int                     `json:"price_quantity_basis"`
 		MemberPriceFrom     string                  `json:"member_price_from,omitempty"`
 		WholesalePrices     []channelWholesalePrice `json:"wholesale_prices,omitempty"`
 		Currency            string                  `json:"currency"`
@@ -207,7 +215,8 @@ func (h *Handler) GetProducts(c *gin.Context) {
 			Summary:             summary,
 			ImageURL:            imageURL,
 			PriceFrom:           p.PriceAmount.String(),
-			WholesalePrices:     normalizeChannelWholesalePrices(p.WholesalePrices),
+			PriceQuantityBasis:  service.NormalizePriceQuantityBasis(p.PriceQuantityBasis),
+			WholesalePrices:     channelWholesalePricesForBasis(p.WholesalePrices, p.PriceQuantityBasis),
 			Currency:            currency,
 			StockStatus:         stockStatus,
 			StockCount:          stockCount,
@@ -220,7 +229,7 @@ func (h *Handler) GetProducts(c *gin.Context) {
 		}
 
 		// 计算会员价
-		if memberLevelID > 0 && h.MemberLevelService != nil {
+		if item.PriceQuantityBasis == 1 && memberLevelID > 0 && h.MemberLevelService != nil {
 			memberPrice, _ := h.MemberLevelService.ResolveMemberPrice(memberLevelID, p.ID, 0, p.PriceAmount.Decimal)
 			if memberPrice.LessThan(p.PriceAmount.Decimal) {
 				item.MemberPriceFrom = models.NewMoneyFromDecimal(memberPrice).String()
@@ -301,6 +310,7 @@ func (h *Handler) GetProductDetail(c *gin.Context) {
 		SKUCode             string `json:"sku_code"`
 		SpecValues          string `json:"spec_values"`
 		Price               string `json:"price"`
+		PriceQuantityBasis  int    `json:"price_quantity_basis"`
 		MemberPrice         string `json:"member_price,omitempty"`
 		StockStatus         string `json:"stock_status"`
 		StockCount          int64  `json:"stock_count"`
@@ -325,6 +335,7 @@ func (h *Handler) GetProductDetail(c *gin.Context) {
 			SKUCode:             sku.SKUCode,
 			SpecValues:          specValues,
 			Price:               sku.PriceAmount.String(),
+			PriceQuantityBasis:  service.SKUPriceQuantityBasis(product.PriceQuantityBasis, sku.PriceQuantityBasis),
 			StockStatus:         stockStatus,
 			StockCount:          stockCount,
 			StockDisplayMode:    stockDisplay.mode,
@@ -333,7 +344,7 @@ func (h *Handler) GetProductDetail(c *gin.Context) {
 			StockRangeMax:       stockDisplay.rangeMax,
 			StockQuantityHidden: stockDisplay.quantityHidden,
 		}
-		if memberLevelID > 0 && h.MemberLevelService != nil {
+		if si.PriceQuantityBasis == 1 && memberLevelID > 0 && h.MemberLevelService != nil {
 			memberPrice, _ := h.MemberLevelService.ResolveMemberPrice(memberLevelID, product.ID, sku.ID, sku.PriceAmount.Decimal)
 			if memberPrice.LessThan(sku.PriceAmount.Decimal) {
 				si.MemberPrice = models.NewMoneyFromDecimal(memberPrice).String()
@@ -344,7 +355,7 @@ func (h *Handler) GetProductDetail(c *gin.Context) {
 
 	// 商品级会员价
 	var memberPriceFrom string
-	if memberLevelID > 0 && h.MemberLevelService != nil {
+	if service.NormalizePriceQuantityBasis(product.PriceQuantityBasis) == 1 && memberLevelID > 0 && h.MemberLevelService != nil {
 		mp, _ := h.MemberLevelService.ResolveMemberPrice(memberLevelID, product.ID, 0, product.PriceAmount.Decimal)
 		if mp.LessThan(product.PriceAmount.Decimal) {
 			memberPriceFrom = models.NewMoneyFromDecimal(mp).String()
@@ -360,8 +371,9 @@ func (h *Handler) GetProductDetail(c *gin.Context) {
 		"description":           description,
 		"image_url":             imageURL,
 		"price_from":            product.PriceAmount.String(),
+		"price_quantity_basis":  service.NormalizePriceQuantityBasis(product.PriceQuantityBasis),
 		"member_price_from":     memberPriceFrom,
-		"wholesale_prices":      normalizeChannelWholesalePrices(product.WholesalePrices),
+		"wholesale_prices":      channelWholesalePricesForBasis(product.WholesalePrices, product.PriceQuantityBasis),
 		"currency":              currency,
 		"stock_status":          stockStatus,
 		"stock_count":           stockCount,

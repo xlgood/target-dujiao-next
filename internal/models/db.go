@@ -20,6 +20,7 @@ const (
 	categoryParentMigrationSettingKey               = "migration/category_parent_v1"
 	paymentProviderBepusdtRenameMigrationSettingKey = "migration/payment_provider_bepusdt_rename_v1"
 	orderItemOriginalPriceMigrationKey              = "migration/order_item_original_price_v1"
+	fansGurusPriceBasisMigrationSettingKey          = "migration/fansgurus_price_basis_v1"
 	manualStockUnlimitedValue                       = -1
 )
 
@@ -184,6 +185,9 @@ func AutoMigrate() error {
 		return err
 	}
 	if err := ensureOrderItemOriginalPriceMigration(); err != nil {
+		return err
+	}
+	if err := ensureFansGurusPriceBasisMigration(); err != nil {
 		return err
 	}
 	if err := ensureResellerIndexes(DB); err != nil {

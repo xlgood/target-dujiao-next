@@ -177,37 +177,39 @@ func (h *Handler) ListCategories(c *gin.Context) {
 
 // upstreamProduct 上游商品响应格式
 type upstreamProduct struct {
-	ID               uint                       `json:"id"`
-	Slug             string                     `json:"slug"`
-	SeoMeta          models.JSON                `json:"seo_meta"`
-	Title            models.JSON                `json:"title"`
-	Description      models.JSON                `json:"description"`
-	Content          models.JSON                `json:"content"`
-	Images           models.StringArray         `json:"images"`
-	Tags             models.StringArray         `json:"tags"`
-	PriceAmount      string                     `json:"price_amount"`
-	OriginalPrice    string                     `json:"original_price,omitempty"`
-	MemberPrice      string                     `json:"member_price,omitempty"`
-	WholesalePrices  models.WholesalePriceTiers `json:"wholesale_prices,omitempty"`
-	FulfillmentType  string                     `json:"fulfillment_type"`
-	ManualFormSchema models.JSON                `json:"manual_form_schema"`
-	IsActive         bool                       `json:"is_active"`
-	CategoryID       uint                       `json:"category_id"`
-	SKUs             []upstreamSKU              `json:"skus"`
-	CreatedAt        time.Time                  `json:"created_at"`
-	UpdatedAt        time.Time                  `json:"updated_at"`
+	ID                 uint                       `json:"id"`
+	Slug               string                     `json:"slug"`
+	SeoMeta            models.JSON                `json:"seo_meta"`
+	Title              models.JSON                `json:"title"`
+	Description        models.JSON                `json:"description"`
+	Content            models.JSON                `json:"content"`
+	Images             models.StringArray         `json:"images"`
+	Tags               models.StringArray         `json:"tags"`
+	PriceAmount        string                     `json:"price_amount"`
+	PriceQuantityBasis int                        `json:"price_quantity_basis"`
+	OriginalPrice      string                     `json:"original_price,omitempty"`
+	MemberPrice        string                     `json:"member_price,omitempty"`
+	WholesalePrices    models.WholesalePriceTiers `json:"wholesale_prices,omitempty"`
+	FulfillmentType    string                     `json:"fulfillment_type"`
+	ManualFormSchema   models.JSON                `json:"manual_form_schema"`
+	IsActive           bool                       `json:"is_active"`
+	CategoryID         uint                       `json:"category_id"`
+	SKUs               []upstreamSKU              `json:"skus"`
+	CreatedAt          time.Time                  `json:"created_at"`
+	UpdatedAt          time.Time                  `json:"updated_at"`
 }
 
 type upstreamSKU struct {
-	ID            uint        `json:"id"`
-	SKUCode       string      `json:"sku_code"`
-	SpecValues    models.JSON `json:"spec_values"`
-	PriceAmount   string      `json:"price_amount"`
-	OriginalPrice string      `json:"original_price,omitempty"`
-	MemberPrice   string      `json:"member_price,omitempty"`
-	StockStatus   string      `json:"stock_status"`
-	StockQuantity int         `json:"stock_quantity"`
-	IsActive      bool        `json:"is_active"`
+	ID                 uint        `json:"id"`
+	SKUCode            string      `json:"sku_code"`
+	SpecValues         models.JSON `json:"spec_values"`
+	PriceAmount        string      `json:"price_amount"`
+	PriceQuantityBasis int         `json:"price_quantity_basis"`
+	OriginalPrice      string      `json:"original_price,omitempty"`
+	MemberPrice        string      `json:"member_price,omitempty"`
+	StockStatus        string      `json:"stock_status"`
+	StockQuantity      int         `json:"stock_quantity"`
+	IsActive           bool        `json:"is_active"`
 }
 
 // ListProducts GET /api/v1/upstream/products
@@ -852,15 +854,16 @@ func (h *Handler) toUpstreamProductWithMemberPrice(p models.Product, memberLevel
 		}
 		stockStatus, stockQuantity := computeSKUStock(p, s)
 		si := upstreamSKU{
-			ID:            s.ID,
-			SKUCode:       s.SKUCode,
-			SpecValues:    s.SpecValuesJSON,
-			PriceAmount:   s.PriceAmount.StringFixed(2),
-			StockStatus:   stockStatus,
-			StockQuantity: stockQuantity,
-			IsActive:      s.IsActive,
+			ID:                 s.ID,
+			SKUCode:            s.SKUCode,
+			SpecValues:         s.SpecValuesJSON,
+			PriceAmount:        s.PriceAmount.StringFixed(2),
+			PriceQuantityBasis: service.SKUPriceQuantityBasis(p.PriceQuantityBasis, s.PriceQuantityBasis),
+			StockStatus:        stockStatus,
+			StockQuantity:      stockQuantity,
+			IsActive:           s.IsActive,
 		}
-		if memberLevelID > 0 && h.MemberLevelService != nil {
+		if si.PriceQuantityBasis == 1 && memberLevelID > 0 && h.MemberLevelService != nil {
 			mp, _ := h.MemberLevelService.ResolveMemberPrice(memberLevelID, p.ID, s.ID, s.PriceAmount.Decimal)
 			if mp.LessThan(s.PriceAmount.Decimal) {
 				si.OriginalPrice = si.PriceAmount
@@ -878,26 +881,27 @@ func (h *Handler) toUpstreamProductWithMemberPrice(p models.Product, memberLevel
 	}
 
 	result := upstreamProduct{
-		ID:               p.ID,
-		Slug:             p.Slug,
-		SeoMeta:          p.SeoMetaJSON,
-		Title:            p.TitleJSON,
-		Description:      p.DescriptionJSON,
-		Content:          p.ContentJSON,
-		Images:           p.Images,
-		Tags:             p.Tags,
-		PriceAmount:      p.PriceAmount.StringFixed(2),
-		WholesalePrices:  p.WholesalePrices,
-		FulfillmentType:  effectiveFulfillmentType,
-		ManualFormSchema: p.ManualFormSchemaJSON,
-		IsActive:         p.IsActive,
-		CategoryID:       p.CategoryID,
-		SKUs:             skus,
-		CreatedAt:        p.CreatedAt,
-		UpdatedAt:        p.UpdatedAt,
+		ID:                 p.ID,
+		Slug:               p.Slug,
+		SeoMeta:            p.SeoMetaJSON,
+		Title:              p.TitleJSON,
+		Description:        p.DescriptionJSON,
+		Content:            p.ContentJSON,
+		Images:             p.Images,
+		Tags:               p.Tags,
+		PriceAmount:        p.PriceAmount.StringFixed(2),
+		PriceQuantityBasis: service.NormalizePriceQuantityBasis(p.PriceQuantityBasis),
+		WholesalePrices:    p.WholesalePrices,
+		FulfillmentType:    effectiveFulfillmentType,
+		ManualFormSchema:   p.ManualFormSchemaJSON,
+		IsActive:           p.IsActive,
+		CategoryID:         p.CategoryID,
+		SKUs:               skus,
+		CreatedAt:          p.CreatedAt,
+		UpdatedAt:          p.UpdatedAt,
 	}
 
-	if memberLevelID > 0 && h.MemberLevelService != nil {
+	if result.PriceQuantityBasis == 1 && memberLevelID > 0 && h.MemberLevelService != nil {
 		mp, _ := h.MemberLevelService.ResolveMemberPrice(memberLevelID, p.ID, 0, p.PriceAmount.Decimal)
 		if mp.LessThan(p.PriceAmount.Decimal) {
 			result.OriginalPrice = result.PriceAmount

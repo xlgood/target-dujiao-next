@@ -19,6 +19,7 @@ import (
 	"github.com/dujiao-next/internal/upstream"
 
 	"github.com/google/uuid"
+	"github.com/hibiken/asynq"
 	"github.com/shopspring/decimal"
 	"gorm.io/gorm"
 )
@@ -146,6 +147,16 @@ func (s *ProcurementOrderService) createProcurementForSingleOrder(order *models.
 	if mapping == nil {
 		return fmt.Errorf("no product mapping for product %d", item.ProductID)
 	}
+	if !mapping.IsActive || mapping.UpstreamStatus == models.UpstreamStatusInactive || mapping.UpstreamStatus == models.UpstreamStatusDeleted {
+		return ErrMappingInactive
+	}
+	conn, err := s.connSvc.GetByID(mapping.ConnectionID)
+	if err != nil {
+		return fmt.Errorf("load connection: %w", err)
+	}
+	if conn == nil || conn.Status == constants.ConnectionStatusDisabled {
+		return ErrConnectionInvalid
+	}
 
 	procOrder := &models.ProcurementOrder{
 		ConnectionID:    mapping.ConnectionID,
@@ -206,6 +217,10 @@ func (s *ProcurementOrderService) SubmitToUpstream(procurementOrderID uint) erro
 	if conn == nil {
 		s.rejectProcurement(procOrder, fmt.Sprintf("connection %d not found", procOrder.ConnectionID))
 		return nil // 永久性错误，不重试
+	}
+	if conn.Status == constants.ConnectionStatusDisabled {
+		s.rejectProcurement(procOrder, fmt.Sprintf("connection %d is not active", procOrder.ConnectionID))
+		return nil
 	}
 	switch conn.Protocol {
 	case constants.ConnectionProtocolFansGurus, constants.ConnectionProtocolTGXAccount:
@@ -353,6 +368,9 @@ func (s *ProcurementOrderService) loadProviderProcurementContext(procOrder *mode
 	if mapping == nil {
 		return nil, models.OrderItem{}, nil, nil, fmt.Errorf("no product mapping for product %d", item.ProductID)
 	}
+	if !mapping.IsActive || mapping.UpstreamStatus == models.UpstreamStatusInactive || mapping.UpstreamStatus == models.UpstreamStatusDeleted {
+		return nil, models.OrderItem{}, nil, nil, ErrMappingInactive
+	}
 	skuMapping, err := s.skuMapRepo.GetByLocalSKUID(item.SKUID)
 	if err != nil {
 		return nil, models.OrderItem{}, nil, nil, fmt.Errorf("lookup sku mapping failed: %w", err)
@@ -431,6 +449,13 @@ func (s *ProcurementOrderService) submitTGXProcurement(ctx context.Context, proc
 	}
 
 	client := upstream.NewTGXClient(conn.BaseURL, conn.ApiKey, appKey)
+	if err := s.verifyTGXInventory(ctx, client, skuMapping, sharedCode, race, item.Quantity); err != nil {
+		if errors.Is(err, ErrUpstreamStockInsufficient) {
+			s.rejectProcurement(procOrder, "tgx inventory is insufficient")
+			return nil
+		}
+		return s.failProviderSubmitForUser(procOrder, localOrder, fmt.Sprintf("tgx inventory check unavailable: %v", err))
+	}
 	resp, err := client.Trade(ctx, req)
 	if err != nil {
 		if recovered, recoverErr := queryTGXTradeByRequestNo(client, localOrder.OrderNo); recoverErr == nil && recovered != nil && strings.TrimSpace(recovered.TradeNo) != "" {
@@ -449,6 +474,44 @@ func (s *ProcurementOrderService) submitTGXProcurement(ctx context.Context, proc
 	}
 
 	return s.acceptTGXProcurement(procOrder, localOrder, resp.TradeNo, resp.Secret, resp.Status)
+}
+
+func (s *ProcurementOrderService) verifyTGXInventory(ctx context.Context, client *upstream.TGXClient, skuMapping *models.SKUMapping, sharedCode, race string, quantity int) error {
+	if client == nil || skuMapping == nil || sharedCode == "" || quantity <= 0 {
+		return ErrUpstreamStockInsufficient
+	}
+	inventory, err := client.GetInventory(ctx, sharedCode, race)
+	if err != nil {
+		return err
+	}
+	state, err := client.GetInventoryState(ctx, sharedCode, race, quantity)
+	if err != nil {
+		return err
+	}
+	now := time.Now()
+	skuMapping.StockSyncedAt = &now
+	skuMapping.UpstreamIsActive = state != nil && state.Available
+	if state == nil || !state.Available {
+		skuMapping.UpstreamStock = 0
+	} else if inventory != nil && inventory.Stock > 0 {
+		// A zero value is ambiguous for inventory-hidden TGX products. The
+		// inventoryState result remains authoritative in that case.
+		skuMapping.UpstreamStock = inventory.Stock
+	} else {
+		skuMapping.UpstreamStock = -1
+	}
+	if s.skuMapRepo != nil {
+		if updateErr := s.skuMapRepo.Update(skuMapping); updateErr != nil {
+			return updateErr
+		}
+	}
+	if state == nil || !state.Available {
+		return ErrUpstreamStockInsufficient
+	}
+	if inventory != nil && inventory.Stock > 0 && inventory.Stock < quantity {
+		return ErrUpstreamStockInsufficient
+	}
+	return nil
 }
 
 func (s *ProcurementOrderService) acceptTGXProcurement(procOrder *models.ProcurementOrder, localOrder *models.Order, tradeNo, secret, status string) error {
@@ -699,7 +762,7 @@ func (s *ProcurementOrderService) handleSubmitFailure(procOrder *models.Procurem
 		if s.queueClient != nil {
 			_ = s.queueClient.EnqueueProcurementSubmit(queue.ProcurementSubmitPayload{
 				ProcurementOrderID: procOrder.ID,
-			})
+			}, asynq.ProcessIn(delay))
 		}
 
 		return nil
@@ -992,102 +1055,111 @@ func (s *ProcurementOrderService) requeuePoll(procOrder *models.ProcurementOrder
 // SyncAcceptedOrders 定时巡检：检查所有 accepted 状态的采购单，向上游查询最新状态
 // 由 worker 定时任务调用（每30分钟）
 func (s *ProcurementOrderService) SyncAcceptedOrders() {
-	orders, _, err := s.procRepo.List(repository.ProcurementOrderListFilter{
+	const pageSize = 200
+	_, total, err := s.procRepo.List(repository.ProcurementOrderListFilter{
 		Status:     "accepted",
-		Pagination: repository.Pagination{Page: 1, PageSize: 200},
+		Pagination: repository.Pagination{Page: 1, PageSize: 1},
 	})
 	if err != nil {
-		logger.Warnw("procurement_sync_accepted_list_failed", "error", err)
+		logger.Warnw("procurement_sync_accepted_count_failed", "error", err)
 		return
 	}
-	if len(orders) == 0 {
-		return
-	}
-
-	logger.Infow("procurement_sync_accepted_start", "count", len(orders))
-
-	for i := range orders {
-		procOrder := &orders[i]
-		conn, err := s.connSvc.GetByID(procOrder.ConnectionID)
-		if err != nil || conn == nil {
+	for page := int((total + pageSize - 1) / pageSize); page >= 1; page-- {
+		orders, _, err := s.procRepo.List(repository.ProcurementOrderListFilter{
+			Status:     "accepted",
+			Pagination: repository.Pagination{Page: page, PageSize: pageSize},
+		})
+		if err != nil {
+			logger.Warnw("procurement_sync_accepted_list_failed", "page", page, "error", err)
+			return
+		}
+		if len(orders) == 0 {
 			continue
 		}
-		if conn.Protocol == constants.ConnectionProtocolFansGurus || conn.Protocol == constants.ConnectionProtocolTGXAccount {
+		logger.Infow("procurement_sync_accepted_page", "page", page, "count", len(orders))
+		for i := range orders {
+			procOrder := &orders[i]
+			conn, err := s.connSvc.GetByID(procOrder.ConnectionID)
+			if err != nil || conn == nil {
+				continue
+			}
+			if conn.Protocol == constants.ConnectionProtocolFansGurus || conn.Protocol == constants.ConnectionProtocolTGXAccount {
+				ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+				if err := s.pollProviderStatus(ctx, procOrder, conn, false); err != nil {
+					logger.Warnw("procurement_sync_provider_status_failed",
+						"procurement_order_id", procOrder.ID,
+						"protocol", conn.Protocol,
+						"error", err,
+					)
+				}
+				cancel()
+				continue
+			}
+			if procOrder.UpstreamOrderID == 0 {
+				continue
+			}
+			adapter, err := s.connSvc.GetAdapter(conn)
+			if err != nil {
+				continue
+			}
+
 			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-			if err := s.pollProviderStatus(ctx, procOrder, conn, false); err != nil {
-				logger.Warnw("procurement_sync_provider_status_failed",
-					"procurement_order_id", procOrder.ID,
-					"protocol", conn.Protocol,
-					"error", err,
-				)
-			}
+			detail, err := adapter.GetOrder(ctx, procOrder.UpstreamOrderID)
 			cancel()
-			continue
-		}
-		if procOrder.UpstreamOrderID == 0 {
-			continue
-		}
-		adapter, err := s.connSvc.GetAdapter(conn)
-		if err != nil {
-			continue
-		}
 
-		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-		detail, err := adapter.GetOrder(ctx, procOrder.UpstreamOrderID)
-		cancel()
-
-		if err != nil {
-			logger.Warnw("procurement_sync_accepted_poll_error",
-				"procurement_order_id", procOrder.ID,
-				"upstream_order_id", procOrder.UpstreamOrderID,
-				"error", err,
-			)
-			continue
-		}
-
-		mappedStatus := mapProcurementUpstreamStatus(detail.Status)
-		switch mappedStatus {
-		case "delivered":
-			if cbErr := s.HandleUpstreamCallback(procOrder.ID, mappedStatus, detail.Fulfillment); cbErr != nil {
-				logger.Warnw("procurement_sync_accepted_deliver_failed",
-					"procurement_order_id", procOrder.ID,
-					"error", cbErr,
-				)
-			} else {
-				logger.Infow("procurement_sync_accepted_delivered",
-					"procurement_order_id", procOrder.ID,
-				)
-			}
-		case "canceled":
-			_ = s.HandleUpstreamCallback(procOrder.ID, mappedStatus, nil)
-			logger.Infow("procurement_sync_accepted_canceled",
-				"procurement_order_id", procOrder.ID,
-			)
-		case "refunded", "partially_refunded":
-			if cbErr := s.HandleUpstreamCallback(procOrder.ID, mappedStatus, detail.Fulfillment); cbErr != nil {
-				logger.Warnw("procurement_sync_accepted_refund_failed",
-					"procurement_order_id", procOrder.ID,
-					"upstream_status", mappedStatus,
-					"error", cbErr,
-				)
-			} else {
-				logger.Infow("procurement_sync_accepted_refunded",
-					"procurement_order_id", procOrder.ID,
-					"upstream_status", mappedStatus,
-				)
-			}
-		default:
-			// 检查是否超时（超过 24 小时仍在 accepted 状态）
-			acceptedDuration := time.Since(procOrder.UpdatedAt)
-			if acceptedDuration > 24*time.Hour {
-				logger.Warnw("procurement_accepted_timeout",
+			if err != nil {
+				logger.Warnw("procurement_sync_accepted_poll_error",
 					"procurement_order_id", procOrder.ID,
 					"upstream_order_id", procOrder.UpstreamOrderID,
-					"accepted_duration", acceptedDuration.String(),
+					"error", err,
 				)
-				s.notifyProcurementFailure(procOrder, fmt.Sprintf(
-					"procurement order stuck in accepted for %s, upstream status: %s",
-					acceptedDuration.Round(time.Hour), detail.Status))
+				continue
+			}
+
+			mappedStatus := mapProcurementUpstreamStatus(detail.Status)
+			switch mappedStatus {
+			case "delivered":
+				if cbErr := s.HandleUpstreamCallback(procOrder.ID, mappedStatus, detail.Fulfillment); cbErr != nil {
+					logger.Warnw("procurement_sync_accepted_deliver_failed",
+						"procurement_order_id", procOrder.ID,
+						"error", cbErr,
+					)
+				} else {
+					logger.Infow("procurement_sync_accepted_delivered",
+						"procurement_order_id", procOrder.ID,
+					)
+				}
+			case "canceled":
+				_ = s.HandleUpstreamCallback(procOrder.ID, mappedStatus, nil)
+				logger.Infow("procurement_sync_accepted_canceled",
+					"procurement_order_id", procOrder.ID,
+				)
+			case "refunded", "partially_refunded":
+				if cbErr := s.HandleUpstreamCallback(procOrder.ID, mappedStatus, detail.Fulfillment); cbErr != nil {
+					logger.Warnw("procurement_sync_accepted_refund_failed",
+						"procurement_order_id", procOrder.ID,
+						"upstream_status", mappedStatus,
+						"error", cbErr,
+					)
+				} else {
+					logger.Infow("procurement_sync_accepted_refunded",
+						"procurement_order_id", procOrder.ID,
+						"upstream_status", mappedStatus,
+					)
+				}
+			default:
+				// 检查是否超时（超过 24 小时仍在 accepted 状态）
+				acceptedDuration := time.Since(procOrder.UpdatedAt)
+				if acceptedDuration > 24*time.Hour {
+					logger.Warnw("procurement_accepted_timeout",
+						"procurement_order_id", procOrder.ID,
+						"upstream_order_id", procOrder.UpstreamOrderID,
+						"accepted_duration", acceptedDuration.String(),
+					)
+					s.notifyProcurementFailure(procOrder, fmt.Sprintf(
+						"procurement order stuck in accepted for %s, upstream status: %s",
+						acceptedDuration.Round(time.Hour), detail.Status))
+				}
 			}
 		}
 	}

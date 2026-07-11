@@ -1256,6 +1256,64 @@ func TestBuildOrderResultOriginalAmountBeforePromotion(t *testing.T) {
 	}
 }
 
+func TestBuildOrderResultUsesPriceQuantityBasis(t *testing.T) {
+	dsn := fmt.Sprintf("file:order_service_price_basis_%d?mode=memory&cache=shared", time.Now().UnixNano())
+	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open sqlite failed: %v", err)
+	}
+	if err := db.AutoMigrate(&models.Category{}, &models.Product{}, &models.ProductSKU{}, &models.Promotion{}); err != nil {
+		t.Fatalf("auto migrate failed: %v", err)
+	}
+
+	category := models.Category{Slug: "price-basis", NameJSON: models.JSON{"zh-CN": "计价单位"}}
+	if err := db.Create(&category).Error; err != nil {
+		t.Fatalf("create category: %v", err)
+	}
+	product := models.Product{
+		CategoryID:         category.ID,
+		Slug:               "followers-per-thousand",
+		TitleJSON:          models.JSON{"zh-CN": "Followers"},
+		PriceAmount:        models.NewMoneyFromDecimal(decimal.NewFromInt(10)),
+		PriceQuantityBasis: 1000,
+		PurchaseType:       constants.ProductPurchaseMember,
+		FulfillmentType:    constants.FulfillmentTypeManual,
+		ManualStockTotal:   constants.ManualStockUnlimited,
+		IsActive:           true,
+	}
+	if err := db.Create(&product).Error; err != nil {
+		t.Fatalf("create product: %v", err)
+	}
+	sku := models.ProductSKU{
+		ProductID:          product.ID,
+		SKUCode:            models.DefaultSKUCode,
+		PriceAmount:        models.NewMoneyFromDecimal(decimal.NewFromInt(10)),
+		PriceQuantityBasis: 1000,
+		ManualStockTotal:   constants.ManualStockUnlimited,
+		IsActive:           true,
+	}
+	if err := db.Create(&sku).Error; err != nil {
+		t.Fatalf("create sku: %v", err)
+	}
+
+	svc := NewOrderService(OrderServiceOptions{
+		ProductRepo:    repository.NewProductRepository(db),
+		ProductSKURepo: repository.NewProductSKURepository(db),
+		PromotionRepo:  repository.NewPromotionRepository(db),
+		ExpireMinutes:  15,
+	})
+	result, err := svc.buildOrderResult(orderCreateParams{UserID: 1, Items: []CreateOrderItem{{ProductID: product.ID, SKUID: sku.ID, Quantity: 500}}})
+	if err != nil {
+		t.Fatalf("buildOrderResult: %v", err)
+	}
+	if !result.OriginalAmount.Equal(decimal.RequireFromString("5.00")) || !result.TotalAmount.Equal(decimal.RequireFromString("5.00")) {
+		t.Fatalf("amounts original=%s total=%s, want 5.00", result.OriginalAmount, result.TotalAmount)
+	}
+	if result.OrderItems[0].PriceQuantityBasis != 1000 || result.OrderItems[0].OriginalTotalPrice.String() != "5.00" {
+		t.Fatalf("unexpected order item: %+v", result.OrderItems[0])
+	}
+}
+
 func TestBuildOrderResultRejectsZeroTotalAmountAfterCoupon(t *testing.T) {
 	dsn := fmt.Sprintf("file:order_service_coupon_zero_%d?mode=memory&cache=shared", time.Now().UnixNano())
 	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})

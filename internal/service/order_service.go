@@ -284,6 +284,7 @@ type OrderPreviewItem struct {
 	Tags               models.StringArray `json:"tags"`
 	OriginalUnitPrice  models.Money       `json:"original_unit_price"`
 	UnitPrice          models.Money       `json:"unit_price"`
+	PriceQuantityBasis int                `json:"price_quantity_basis"`
 	Quantity           int                `json:"quantity"`
 	OriginalTotalPrice models.Money       `json:"original_total_price"`
 	TotalPrice         models.Money       `json:"total_price"`
@@ -368,6 +369,7 @@ func (s *OrderService) previewOrder(input orderCreateParams) (*OrderPreview, err
 			Tags:               item.Tags,
 			OriginalUnitPrice:  item.OriginalUnitPrice,
 			UnitPrice:          item.UnitPrice,
+			PriceQuantityBasis: item.PriceQuantityBasis,
 			Quantity:           item.Quantity,
 			OriginalTotalPrice: item.OriginalTotalPrice,
 			TotalPrice:         item.TotalPrice,

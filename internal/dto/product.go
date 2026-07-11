@@ -16,6 +16,7 @@ type ProductResp struct {
 	Description          models.JSON          `json:"description"`
 	Content              models.JSON          `json:"content"`
 	PriceAmount          models.Money         `json:"price_amount"`
+	PriceQuantityBasis   int                  `json:"price_quantity_basis"`
 	WholesalePrices      []WholesalePriceResp `json:"wholesale_prices,omitempty"`
 	Images               models.StringArray   `json:"images"`
 	Tags                 models.StringArray   `json:"tags"`
@@ -87,6 +88,7 @@ type SKUResp struct {
 	SKUCode             string       `json:"sku_code"`
 	SpecValues          models.JSON  `json:"spec_values"`
 	PriceAmount         models.Money `json:"price_amount"`
+	PriceQuantityBasis  int          `json:"price_quantity_basis"`
 	ManualStockTotal    int          `json:"manual_stock_total"`
 	ManualStockSold     int          `json:"manual_stock_sold"`
 	AutoStockAvailable  int64        `json:"auto_stock_available"`

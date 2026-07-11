@@ -17,6 +17,7 @@ type Product struct {
 	ContentJSON          JSON                `gorm:"type:json" json:"content"`                                            // 多语言详情（Markdown）
 	InstructionsJSON     JSON                `gorm:"type:json" json:"instructions"`                                       // 多语言交付后使用说明（仅订单详情可见）
 	PriceAmount          Money               `gorm:"type:decimal(20,2);not null;default:0" json:"price_amount"`           // 价格金额
+	PriceQuantityBasis   int                 `gorm:"not null;default:1" json:"price_quantity_basis"`                      // 该价格对应的数量（默认单价）
 	CostPriceAmount      Money               `gorm:"type:decimal(20,2);not null;default:0" json:"cost_price_amount"`      // 成本价（取最低活跃SKU成本价）
 	WholesalePrices      WholesalePriceTiers `gorm:"type:json" json:"wholesale_prices"`                                   // 批发价阶梯
 	Images               StringArray         `gorm:"type:json" json:"images"`                                             // 图片数组

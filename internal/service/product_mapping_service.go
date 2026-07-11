@@ -95,7 +95,28 @@ func (s *ProductMappingService) SetActive(id uint, active bool) error {
 		return ErrMappingNotFound
 	}
 	mapping.IsActive = active
-	return s.mappingRepo.Update(mapping)
+	if err := s.mappingRepo.Update(mapping); err != nil {
+		return err
+	}
+	if !active {
+		return s.deactivateMappedProduct(mapping)
+	}
+	return nil
+}
+
+func (s *ProductMappingService) deactivateMappedProduct(mapping *models.ProductMapping) error {
+	if mapping == nil || mapping.LocalProductID == 0 || s.productRepo == nil {
+		return nil
+	}
+	product, err := s.productRepo.GetByID(strconv.FormatUint(uint64(mapping.LocalProductID), 10))
+	if err != nil {
+		return err
+	}
+	if product != nil && product.FulfillmentType == constants.FulfillmentTypeUpstream && product.IsActive {
+		product.IsActive = false
+		return s.productRepo.Update(product)
+	}
+	return nil
 }
 
 // Delete 删除映射（不删除本地商品）

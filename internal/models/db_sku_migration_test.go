@@ -170,6 +170,33 @@ func TestEnsureProductSKUMigrationBackfillLegacyData(t *testing.T) {
 	}
 }
 
+func TestEnsureFansGurusPriceBasisMigration(t *testing.T) {
+	db := setupSKUMigrationTestDB(t)
+	if err := db.AutoMigrate(&Product{}, &ProductSKU{}, &ProductMapping{}, &Setting{}); err != nil {
+		t.Fatalf("auto migrate failed: %v", err)
+	}
+	product := Product{CategoryID: 1, Slug: "fansgurus-legacy", TitleJSON: JSON{"zh-CN": "Followers"}, PriceAmount: NewMoneyFromDecimal(decimal.NewFromInt(10))}
+	if err := db.Create(&product).Error; err != nil {
+		t.Fatalf("create product: %v", err)
+	}
+	sku := ProductSKU{ProductID: product.ID, SKUCode: DefaultSKUCode, PriceAmount: NewMoneyFromDecimal(decimal.NewFromInt(10)), IsActive: true}
+	if err := db.Create(&sku).Error; err != nil {
+		t.Fatalf("create sku: %v", err)
+	}
+	if err := db.Create(&ProductMapping{ConnectionID: 1, LocalProductID: product.ID, Provider: "fansgurus"}).Error; err != nil {
+		t.Fatalf("create mapping: %v", err)
+	}
+	if err := ensureFansGurusPriceBasisMigration(); err != nil {
+		t.Fatalf("migration: %v", err)
+	}
+	if err := db.First(&product, product.ID).Error; err != nil || product.PriceQuantityBasis != 1000 {
+		t.Fatalf("product basis=%d err=%v, want 1000", product.PriceQuantityBasis, err)
+	}
+	if err := db.First(&sku, sku.ID).Error; err != nil || sku.PriceQuantityBasis != 1000 {
+		t.Fatalf("sku basis=%d err=%v, want 1000", sku.PriceQuantityBasis, err)
+	}
+}
+
 func TestMigrateCartSKUUniqueIndex(t *testing.T) {
 	db := setupSKUMigrationTestDB(t)
 	if err := db.AutoMigrate(&CartItem{}); err != nil {

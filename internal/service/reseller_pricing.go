@@ -177,9 +177,9 @@ func (r *ResellerPricingResolver) ApplyToOrderBuildResult(tenant TenantContext, 
 		if err := validateResellerUnitAmount(profile, plan.SKU, baseUnit, resellerUnit); err != nil {
 			return nil, err
 		}
-		quantity := decimal.NewFromInt(int64(plan.Item.Quantity))
-		baseTotal := baseUnit.Mul(quantity).Round(2)
-		resellerTotal := resellerUnit.Mul(quantity).Round(2)
+		basis := SKUPriceQuantityBasis(plan.Product.PriceQuantityBasis, plan.SKU.PriceQuantityBasis)
+		baseTotal := amountForQuantity(baseUnit, plan.Item.Quantity, basis)
+		resellerTotal := amountForQuantity(resellerUnit, plan.Item.Quantity, basis)
 		profit := resellerTotal.Sub(baseTotal).Round(2)
 
 		zeroMoney := models.NewMoneyFromDecimal(decimal.Zero)

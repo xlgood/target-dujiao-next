@@ -108,6 +108,13 @@ func TestImportProviderCatalogCreatesProductsAndMappings(t *testing.T) {
 	if fansMapping.Provider != upstream.CatalogProviderFansGurus || fansMapping.Platform != "instagram" {
 		t.Fatalf("unexpected fans mapping: %+v", fansMapping)
 	}
+	var fansProduct models.Product
+	if err := db.Preload("SKUs").First(&fansProduct, fansMapping.LocalProductID).Error; err != nil {
+		t.Fatalf("load fans product: %v", err)
+	}
+	if fansProduct.PriceQuantityBasis != 1000 || len(fansProduct.SKUs) != 1 || fansProduct.SKUs[0].PriceQuantityBasis != 1000 {
+		t.Fatalf("fans price basis product=%d skus=%+v, want 1000", fansProduct.PriceQuantityBasis, fansProduct.SKUs)
+	}
 
 	var tgxMapping models.ProductMapping
 	if err := db.Where("upstream_product_code = ?", "IG-001").First(&tgxMapping).Error; err != nil {
@@ -129,7 +136,7 @@ func TestImportProviderCatalogCreatesProductsAndMappings(t *testing.T) {
 	}
 }
 
-func TestImportProviderCatalogSkipsExistingMapping(t *testing.T) {
+func TestImportProviderCatalogRefreshesExistingMapping(t *testing.T) {
 	db := setupProviderCatalogImportDB(t)
 	svc := NewProductMappingService(
 		repository.NewProductMappingRepository(db),
@@ -169,12 +176,27 @@ func TestImportProviderCatalogSkipsExistingMapping(t *testing.T) {
 	if err != nil {
 		t.Fatalf("first import: %v", err)
 	}
-	second, err := svc.ImportProviderCatalog(10, catalog)
+	updatedCatalog := catalog
+	updatedCatalog.FansGurus[0].TargetPrice = "12.00000000"
+	updatedCatalog.FansGurus[0].UpstreamPrice = "2.40"
+	updatedCatalog.FansGurus[0].MinQuantity = 1000
+	second, err := svc.ImportProviderCatalog(10, updatedCatalog)
 	if err != nil {
 		t.Fatalf("second import: %v", err)
 	}
-	if first.Imported != 2 || second.Imported != 0 || second.Skipped != 2 {
+	if first.Imported != 2 || second.Imported != 0 || second.Updated != 2 || second.Skipped != 0 {
 		t.Fatalf("unexpected results: first=%+v second=%+v", first, second)
+	}
+	var mapping models.ProductMapping
+	if err := db.Where("connection_id = ? AND upstream_product_code = ?", 10, "16252").First(&mapping).Error; err != nil {
+		t.Fatalf("load mapping: %v", err)
+	}
+	var product models.Product
+	if err := db.Preload("SKUs").First(&product, mapping.LocalProductID).Error; err != nil {
+		t.Fatalf("load product: %v", err)
+	}
+	if product.PriceAmount.String() != "12.00" || product.MinPurchaseQuantity != 1000 || len(product.SKUs) != 1 || product.SKUs[0].PriceAmount.String() != "12.00" {
+		t.Fatalf("existing catalog row was not refreshed: product=%+v skus=%+v", product, product.SKUs)
 	}
 }
 

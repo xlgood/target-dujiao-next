@@ -547,7 +547,7 @@ func (r *GormDashboardRepository) GetTopProducts(startAt, endAt time.Time, limit
 			COUNT(DISTINCT order_items.order_id) as paid_orders,
 			COALESCE(SUM(order_items.quantity), 0) as quantity,
 			COALESCE(SUM(order_items.total_price - order_items.coupon_discount), 0) as paid_amount,
-			COALESCE(SUM(CASE WHEN order_items.cost_price > 0 THEN order_items.cost_price * order_items.quantity ELSE 0 END), 0) as total_cost
+			COALESCE(SUM(CASE WHEN order_items.cost_price > 0 THEN order_items.cost_price * order_items.quantity / CASE WHEN order_items.price_quantity_basis > 0 THEN order_items.price_quantity_basis ELSE 1 END ELSE 0 END), 0) as total_cost
 		`, titleExpr)).
 		Joins("JOIN orders ON orders.id = order_items.order_id").
 		Joins("LEFT JOIN product_skus ON product_skus.id = order_items.sku_id AND product_skus.deleted_at IS NULL").
@@ -733,7 +733,7 @@ func (r *GormDashboardRepository) GetProfitOverview(startAt, endAt time.Time) (D
 	if err := r.db.Model(&models.OrderItem{}).
 		Select(`
 			COALESCE(SUM(order_items.total_price - order_items.coupon_discount), 0) as total_revenue,
-			COALESCE(SUM(order_items.cost_price * order_items.quantity), 0) as total_cost
+			COALESCE(SUM(order_items.cost_price * order_items.quantity / CASE WHEN order_items.price_quantity_basis > 0 THEN order_items.price_quantity_basis ELSE 1 END), 0) as total_cost
 		`).
 		Joins("JOIN orders ON orders.id = order_items.order_id").
 		Where("order_items.cost_price > 0 AND orders.created_at >= ? AND orders.created_at < ? AND orders.status IN ?", startAt, endAt, profitOrderStatuses()).
@@ -760,7 +760,7 @@ func (r *GormDashboardRepository) GetProfitTrends(startAt, endAt time.Time) ([]D
 	if err := r.db.Model(&models.OrderItem{}).Select(fmt.Sprintf(`
 		%s as day,
 		COALESCE(SUM(order_items.total_price - order_items.coupon_discount), 0) as revenue,
-		COALESCE(SUM(order_items.cost_price * order_items.quantity), 0) as cost
+		COALESCE(SUM(order_items.cost_price * order_items.quantity / CASE WHEN order_items.price_quantity_basis > 0 THEN order_items.price_quantity_basis ELSE 1 END), 0) as cost
 	`, orderDayExpr)).
 		Joins("JOIN orders ON orders.id = order_items.order_id").
 		Where("order_items.cost_price > 0 AND orders.created_at >= ? AND orders.created_at < ? AND orders.status IN ?", startAt, endAt, profitOrderStatuses()).

@@ -354,18 +354,10 @@ func (s *ProductMappingService) SyncAllStock(cfg UpstreamSyncConfig) error {
 //     · 同步失败 → 返回 nil（容忍上游抖动，让缓存继续兜底）
 //     · 同步后仍 < requiredQty → 返回 ErrUpstreamStockInsufficient
 //
-// 后台 "pre_order_stock_check_enabled" 关闭时整个方法直接返回 nil。
+// 后台 "pre_order_stock_check_enabled" 关闭时跳过库存刷新，但仍拒绝已停用的映射和连接。
 func (s *ProductMappingService) EnsureUpstreamStockForOrder(localSKUID uint, requiredQty int) error {
 	if s == nil || s.skuMappingRepo == nil || localSKUID == 0 || requiredQty <= 0 {
 		return nil
-	}
-
-	// 后台总开关
-	if s.settingService != nil {
-		cfg, err := s.settingService.GetUpstreamSyncConfig("")
-		if err == nil && !cfg.PreOrderStockCheckEnabled {
-			return nil
-		}
 	}
 
 	skuMapping, err := s.skuMappingRepo.GetByLocalSKUID(localSKUID)
@@ -376,6 +368,41 @@ func (s *ProductMappingService) EnsureUpstreamStockForOrder(localSKUID uint, req
 	}
 	if skuMapping == nil {
 		// 没有上游映射 = 非上游商品
+		return nil
+	}
+	if s.mappingRepo == nil || s.connService == nil {
+		return ErrMappingInactive
+	}
+	mapping, err := s.mappingRepo.GetByID(skuMapping.ProductMappingID)
+	if err != nil {
+		return err
+	}
+	if mapping == nil || !mapping.IsActive || mapping.UpstreamStatus == models.UpstreamStatusInactive || mapping.UpstreamStatus == models.UpstreamStatusDeleted {
+		return ErrMappingInactive
+	}
+	conn, err := s.connService.GetByID(mapping.ConnectionID)
+	if err != nil {
+		return err
+	}
+	if conn == nil || conn.Status == constants.ConnectionStatusDisabled {
+		return ErrConnectionInvalid
+	}
+
+	// Stock refresh can be disabled independently from availability enforcement.
+	if s.settingService != nil {
+		cfg, err := s.settingService.GetUpstreamSyncConfig("")
+		if err == nil && !cfg.PreOrderStockCheckEnabled {
+			return nil
+		}
+	}
+	if mapping.Provider == upstream.CatalogProviderTGX {
+		if err := s.ensureTGXInventoryForOrder(conn, skuMapping, requiredQty); err != nil {
+			if errors.Is(err, ErrUpstreamStockInsufficient) {
+				return err
+			}
+			logger.Warnw("preorder_tgx_inventory_check_failed_open", "local_sku_id", localSKUID, "error", err)
+			return nil
+		}
 		return nil
 	}
 	if skuMapping.UpstreamStock < 0 {
@@ -409,6 +436,48 @@ func (s *ProductMappingService) EnsureUpstreamStockForOrder(localSKUID uint, req
 		return nil
 	}
 	return ErrUpstreamStockInsufficient
+}
+
+func (s *ProductMappingService) ensureTGXInventoryForOrder(conn *models.SiteConnection, skuMapping *models.SKUMapping, quantity int) error {
+	if s == nil || conn == nil || skuMapping == nil || quantity <= 0 {
+		return ErrUpstreamStockInsufficient
+	}
+	sharedCode, race := splitTGXUpstreamSKUCode(skuMapping.UpstreamSKUCode)
+	if sharedCode == "" {
+		return ErrUpstreamStockInsufficient
+	}
+	appKey, err := s.connService.DecryptSecret(conn.ApiSecret)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	client := upstream.NewTGXClient(conn.BaseURL, conn.ApiKey, appKey)
+	inventory, err := client.GetInventory(ctx, sharedCode, race)
+	if err != nil {
+		return err
+	}
+	state, err := client.GetInventoryState(ctx, sharedCode, race, quantity)
+	if err != nil {
+		return err
+	}
+	now := time.Now()
+	skuMapping.StockSyncedAt = &now
+	skuMapping.UpstreamIsActive = state != nil && state.Available
+	if state == nil || !state.Available {
+		skuMapping.UpstreamStock = 0
+	} else if inventory != nil && inventory.Stock > 0 {
+		skuMapping.UpstreamStock = inventory.Stock
+	} else {
+		skuMapping.UpstreamStock = -1
+	}
+	if err := s.skuMappingRepo.Update(skuMapping); err != nil {
+		return err
+	}
+	if state == nil || !state.Available || (inventory != nil && inventory.Stock > 0 && inventory.Stock < quantity) {
+		return ErrUpstreamStockInsufficient
+	}
+	return nil
 }
 
 // fullSyncIntervalFloor 强制全量同步的下限：任何情况下两次全量间隔至少 24h，
