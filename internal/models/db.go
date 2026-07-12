@@ -33,7 +33,7 @@ type DBPoolConfig struct {
 }
 
 // InitDB 初始化数据库连接
-func InitDB(driver, dsn string, pool DBPoolConfig) error {
+func InitDB(driver, dsn, serverMode string, pool DBPoolConfig) error {
 	var err error
 	normalized := strings.ToLower(strings.TrimSpace(driver))
 	var dialector gorm.Dialector
@@ -47,8 +47,14 @@ func InitDB(driver, dsn string, pool DBPoolConfig) error {
 	default:
 		return fmt.Errorf("unsupported database driver: %s", driver)
 	}
+	// SQL logs include bound values. Keep them out of release logs because those
+	// values can contain credentials submitted through administrative forms.
+	gormLogger := logger.Default.LogMode(logger.Silent)
+	if strings.EqualFold(strings.TrimSpace(serverMode), "debug") {
+		gormLogger = logger.Default.LogMode(logger.Info)
+	}
 	DB, err = gorm.Open(dialector, &gorm.Config{
-		Logger:  logger.Default.LogMode(logger.Info),
+		Logger:  gormLogger,
 		NowFunc: func() time.Time { return time.Now().UTC() },
 	})
 	if err != nil {

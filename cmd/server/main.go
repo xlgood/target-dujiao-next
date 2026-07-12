@@ -70,7 +70,7 @@ func main() {
 	}
 
 	// 初始化数据库
-	if err := models.InitDB(cfg.Database.Driver, cfg.Database.DSN, models.DBPoolConfig{
+	if err := models.InitDB(cfg.Database.Driver, cfg.Database.DSN, cfg.Server.Mode, models.DBPoolConfig{
 		MaxOpenConns:           cfg.Database.Pool.MaxOpenConns,
 		MaxIdleConns:           cfg.Database.Pool.MaxIdleConns,
 		ConnMaxLifetimeSeconds: cfg.Database.Pool.ConnMaxLifetimeSeconds,
@@ -149,7 +149,7 @@ func isWeakSecret(secret string) bool {
 // 后委托给 internal/admincmd 包，不启动 HTTP / worker / web 等服务。
 func runAdminSubcommand(args []string) {
 	cfg := config.Load()
-	if err := models.InitDB(cfg.Database.Driver, cfg.Database.DSN, models.DBPoolConfig{
+	if err := models.InitDB(cfg.Database.Driver, cfg.Database.DSN, cfg.Server.Mode, models.DBPoolConfig{
 		MaxOpenConns:           cfg.Database.Pool.MaxOpenConns,
 		MaxIdleConns:           cfg.Database.Pool.MaxIdleConns,
 		ConnMaxLifetimeSeconds: cfg.Database.Pool.ConnMaxLifetimeSeconds,
