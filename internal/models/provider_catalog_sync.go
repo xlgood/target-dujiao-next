@@ -8,6 +8,7 @@ type ProviderCatalogSyncRun struct {
 	FansGurusPulled  int       `gorm:"not null;default:0" json:"fansgurus_pulled"`
 	TGXPulled        int       `gorm:"not null;default:0" json:"tgx_pulled"`
 	Imported         int       `gorm:"not null;default:0" json:"imported"`
+	Updated          int       `gorm:"not null;default:0" json:"updated"`
 	Skipped          int       `gorm:"not null;default:0" json:"skipped"`
 	Deactivated      int       `gorm:"not null;default:0" json:"deactivated"`
 	FilteredTelegram int       `gorm:"not null;default:0" json:"filtered_telegram"`

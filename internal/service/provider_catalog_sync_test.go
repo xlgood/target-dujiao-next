@@ -67,6 +67,9 @@ func TestSyncProviderCatalogWithClientsFiltersAndImports(t *testing.T) {
 	if result.Imported != 2 || result.Skipped != 0 {
 		t.Fatalf("unexpected import counts: %+v", result)
 	}
+	if result.Updated != 0 {
+		t.Fatalf("updated=%d, want 0", result.Updated)
+	}
 	if result.Deactivated != 0 {
 		t.Fatalf("deactivated=%d, want 0", result.Deactivated)
 	}

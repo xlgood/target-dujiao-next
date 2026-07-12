@@ -31,6 +31,7 @@ type ProviderCatalogSyncResult struct {
 	FilteredInactive   int      `json:"filtered_inactive"`
 	FilteredPlatform   int      `json:"filtered_platform"`
 	Imported           int      `json:"imported"`
+	Updated            int      `json:"updated"`
 	Skipped            int      `json:"skipped"`
 	Deactivated        int      `json:"deactivated"`
 }
@@ -102,6 +103,7 @@ func (s *ProductMappingService) SyncProviderCatalogWithClients(
 		FilteredInactive:   len(filtered.FilteredInactive),
 		FilteredPlatform:   len(filtered.FilteredPlatform),
 		Imported:           importResult.Imported,
+		Updated:            importResult.Updated,
 		Skipped:            importResult.Skipped,
 		Deactivated:        deactivated,
 	}
@@ -180,6 +182,7 @@ func (s *ProductMappingService) recordProviderCatalogSyncRun(startedAt time.Time
 	}
 	if result != nil {
 		run.Imported = result.Imported
+		run.Updated = result.Updated
 		run.Skipped = result.Skipped
 		run.Deactivated = result.Deactivated
 		run.FilteredTelegram = result.FilteredTelegram
