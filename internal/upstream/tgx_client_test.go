@@ -29,7 +29,7 @@ func TestTGXSignerSortsDropsEmptyAndDecodes(t *testing.T) {
 	}
 
 	sum := md5.Sum([]byte(wantSigning))
-	wantSign := strings.ToUpper(hex.EncodeToString(sum[:]))
+	wantSign := hex.EncodeToString(sum[:])
 	if got := SignTGX(params, "app-secret"); got != wantSign {
 		t.Fatalf("sign=%s, want %s", got, wantSign)
 	}
@@ -40,7 +40,7 @@ func TestTGXClientConnectAndSignedRequest(t *testing.T) {
 		assertTGXPath(t, r, "/authentication/connect")
 		assertTGXSigned(t, r, "test-app-id", "app-secret")
 		return map[string]interface{}{
-			"code": 0,
+			"code": 200,
 			"data": map[string]string{"shop_name": "TGX Shop", "balance": "88.00"},
 		}
 	})
@@ -60,7 +60,7 @@ func TestTGXClientListItems(t *testing.T) {
 	server := newTGXTestServer(t, func(r *http.Request) interface{} {
 		assertTGXPath(t, r, "/commodity/items")
 		return map[string]interface{}{
-			"code": 0,
+			"code": 200,
 			"data": map[string]interface{}{
 				"items": []map[string]interface{}{
 					{
@@ -145,12 +145,12 @@ func TestTGXClientInventoryTradeAndQuery(t *testing.T) {
 			if got := r.FormValue("race"); got != "普通" {
 				t.Fatalf("race=%s, want 普通", got)
 			}
-			return map[string]interface{}{"code": 0, "data": map[string]interface{}{"code": "IG-001", "race": "普通", "price": "100.00", "stock": 5}}
+			return map[string]interface{}{"code": 200, "data": map[string]interface{}{"code": "IG-001", "race": "普通", "price": "100.00", "stock": 5}}
 		case "/commodity/inventoryState":
 			if got := r.FormValue("quantity"); got != "2" {
 				t.Fatalf("quantity=%s, want 2", got)
 			}
-			return map[string]interface{}{"code": 0, "data": map[string]interface{}{"available": true, "quantity": 2}}
+			return map[string]interface{}{"code": 200, "data": map[string]interface{}{"available": true, "quantity": 2}}
 		case "/commodity/trade":
 			if got := r.FormValue("request_no"); got != "local-order-1" {
 				t.Fatalf("request_no=%s, want local-order-1", got)
@@ -158,12 +158,12 @@ func TestTGXClientInventoryTradeAndQuery(t *testing.T) {
 			if got := r.FormValue("email"); got != "buyer@example.com" {
 				t.Fatalf("email=%s, want buyer@example.com", got)
 			}
-			return map[string]interface{}{"code": 0, "data": map[string]string{"trade_no": "T202607080001", "secret": "account-secret", "status": "completed"}}
+			return map[string]interface{}{"code": 200, "data": map[string]string{"trade_no": "T202607080001", "secret": "account-secret", "status": "completed"}}
 		case "/commodity/query":
 			if got := r.FormValue("trade_no"); got != "T202607080001" {
 				t.Fatalf("trade_no=%s, want T202607080001", got)
 			}
-			return map[string]interface{}{"code": 0, "data": map[string]string{"trade_no": "T202607080001", "secret": "account-secret", "status": "completed"}}
+			return map[string]interface{}{"code": 200, "data": map[string]string{"trade_no": "T202607080001", "secret": "account-secret", "status": "completed"}}
 		default:
 			t.Fatalf("unexpected path: %s", r.URL.Path)
 		}
@@ -220,7 +220,7 @@ func TestTGXClientQueryTradeByRequestNo(t *testing.T) {
 		if r.FormValue("trade_no") != "" {
 			t.Fatal("trade_no must not be sent when querying by request_no")
 		}
-		return map[string]interface{}{"code": 0, "data": map[string]string{"trade_no": "T202607080001", "status": "pending"}}
+		return map[string]interface{}{"code": 200, "data": map[string]string{"trade_no": "T202607080001", "status": "pending"}}
 	})
 	defer server.Close()
 
@@ -257,6 +257,18 @@ func TestTGXClientRedactsAppKeyInErrors(t *testing.T) {
 	}
 	if strings.Contains(err.Error(), "app-secret") {
 		t.Fatalf("error leaked app key: %v", err)
+	}
+}
+
+func TestTGXClientRejectsDocumentedCodeZeroError(t *testing.T) {
+	server := newTGXTestServer(t, func(r *http.Request) interface{} {
+		return map[string]interface{}{"code": 0, "msg": "密钥错误"}
+	})
+	defer server.Close()
+
+	_, err := NewTGXClient(server.URL, "test-app-id", "app-secret").ListItems(context.Background())
+	if !errors.Is(err, ErrTGXBusiness) {
+		t.Fatalf("expected business error for code 0, got %v", err)
 	}
 }
 
@@ -315,7 +327,7 @@ func assertTGXSigned(t *testing.T, r *http.Request, appID, appKey string) {
 	if got != want {
 		t.Fatalf("sign=%s, want %s", got, want)
 	}
-	if r.FormValue("app_key") != "" {
-		t.Fatal("app_key must not be sent in request body")
+	if got := r.FormValue("app_key"); got != appKey {
+		t.Fatalf("app_key=%q, want configured key", got)
 	}
 }

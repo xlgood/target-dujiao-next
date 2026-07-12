@@ -11,7 +11,7 @@ import (
 func SignTGX(params url.Values, appKey string) string {
 	signing := BuildTGXSignString(params, appKey)
 	sum := md5.Sum([]byte(signing))
-	return strings.ToUpper(hex.EncodeToString(sum[:]))
+	return hex.EncodeToString(sum[:])
 }
 
 func BuildTGXSignString(params url.Values, appKey string) string {

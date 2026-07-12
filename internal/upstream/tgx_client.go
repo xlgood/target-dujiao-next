@@ -372,7 +372,7 @@ func decodeTGXResponse(body []byte, appKey string, result interface{}) error {
 	if msg == "" {
 		msg = strings.TrimSpace(wrapper.Msg)
 	}
-	if code != "" && code != "0" && code != "200" && !strings.EqualFold(code, "success") && !strings.EqualFold(code, "ok") {
+	if code != "" && code != "200" && !strings.EqualFold(code, "success") && !strings.EqualFold(code, "ok") {
 		return &TGXError{
 			Kind:    classifyTGXError(msg),
 			Code:    code,
