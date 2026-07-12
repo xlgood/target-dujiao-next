@@ -70,18 +70,22 @@ func (s *SiteConnectionService) Create(input CreateConnectionInput) (*models.Sit
 	if strings.TrimSpace(input.Name) == "" || strings.TrimSpace(input.BaseURL) == "" {
 		return nil, ErrConnectionInvalid
 	}
-	if strings.TrimSpace(input.ApiKey) == "" || strings.TrimSpace(input.ApiSecret) == "" {
-		return nil, ErrConnectionInvalid
-	}
-
 	protocol := strings.TrimSpace(input.Protocol)
 	if protocol == "" {
 		protocol = constants.ConnectionProtocolDujiaoNext
 	}
+	if strings.TrimSpace(input.ApiKey) == "" ||
+		(protocol != constants.ConnectionProtocolFansGurus && strings.TrimSpace(input.ApiSecret) == "") {
+		return nil, ErrConnectionInvalid
+	}
 
-	encryptedSecret, err := crypto.Encrypt(s.encryptKey, input.ApiSecret)
-	if err != nil {
-		return nil, err
+	encryptedSecret := ""
+	if strings.TrimSpace(input.ApiSecret) != "" {
+		var err error
+		encryptedSecret, err = crypto.Encrypt(s.encryptKey, input.ApiSecret)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	retryMax := input.RetryMax
@@ -261,26 +265,45 @@ func (s *SiteConnectionService) Ping(id uint) (*upstream.PingResult, error) {
 		return nil, ErrConnectionNotFound
 	}
 
-	// 解密 secret
-	decrypted, err := s.decryptSecret(conn)
-	if err != nil {
-		return nil, err
-	}
-
-	adapter, err := upstream.NewAdapter(&models.SiteConnection{
-		BaseURL:   conn.BaseURL,
-		ApiKey:    conn.ApiKey,
-		ApiSecret: decrypted,
-		Protocol:  conn.Protocol,
-	}, s.uploadsDir)
-	if err != nil {
-		return nil, err
-	}
-
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
-	result, pingErr := adapter.Ping(ctx)
+	var result *upstream.PingResult
+	var pingErr error
+	switch conn.Protocol {
+	case constants.ConnectionProtocolFansGurus:
+		balance, err := upstream.NewFansGurusClient(conn.BaseURL, conn.ApiKey).GetBalance(ctx)
+		if err == nil {
+			result = &upstream.PingResult{SiteName: conn.Name, Balance: balance.Balance, Currency: balance.Currency}
+		}
+		pingErr = err
+	case constants.ConnectionProtocolTGXAccount:
+		decrypted, err := s.decryptSecret(conn)
+		if err == nil {
+			connected, connectErr := upstream.NewTGXClient(conn.BaseURL, conn.ApiKey, decrypted).Connect(ctx)
+			if connectErr == nil {
+				result = &upstream.PingResult{SiteName: connected.ShopName, Balance: connected.Balance}
+			}
+			pingErr = connectErr
+		} else {
+			pingErr = err
+		}
+	default:
+		decrypted, err := s.decryptSecret(conn)
+		if err != nil {
+			return nil, err
+		}
+		adapter, err := upstream.NewAdapter(&models.SiteConnection{
+			BaseURL:   conn.BaseURL,
+			ApiKey:    conn.ApiKey,
+			ApiSecret: decrypted,
+			Protocol:  conn.Protocol,
+		}, s.uploadsDir)
+		if err != nil {
+			return nil, err
+		}
+		result, pingErr = adapter.Ping(ctx)
+	}
 	now := time.Now()
 	conn.LastPingAt = &now
 	conn.LastPingOK = pingErr == nil

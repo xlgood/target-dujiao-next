@@ -47,6 +47,39 @@ func TestSiteConnectionServicePingReturnsAdapterCreationError(t *testing.T) {
 	}
 }
 
+func TestSiteConnectionServiceCreateAllowsFansGurusWithoutSecret(t *testing.T) {
+	repo := &siteConnectionRepoStub{}
+	svc := NewSiteConnectionService(repo, "test-secret-key", t.TempDir())
+
+	conn, err := svc.Create(CreateConnectionInput{
+		Name:     "FansGurus",
+		BaseURL:  "https://fansgurus.example.com/api/v2",
+		ApiKey:   "fansgurus-api-key",
+		Protocol: constants.ConnectionProtocolFansGurus,
+	})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	if conn.ApiSecret != "" {
+		t.Fatalf("ApiSecret = %q, want empty", conn.ApiSecret)
+	}
+}
+
+func TestSiteConnectionServiceCreateRequiresSecretForTGX(t *testing.T) {
+	repo := &siteConnectionRepoStub{}
+	svc := NewSiteConnectionService(repo, "test-secret-key", t.TempDir())
+
+	_, err := svc.Create(CreateConnectionInput{
+		Name:     "TGX",
+		BaseURL:  "https://tgx.example.com/shared",
+		ApiKey:   "tgx-app-id",
+		Protocol: constants.ConnectionProtocolTGXAccount,
+	})
+	if !errors.Is(err, ErrConnectionInvalid) {
+		t.Fatalf("Create() error = %v, want ErrConnectionInvalid", err)
+	}
+}
+
 type fakeMarkupReapplier struct {
 	calls []uint
 }
