@@ -56,6 +56,16 @@ func TestTGXClientConnectAndSignedRequest(t *testing.T) {
 	}
 }
 
+func TestTGXConnectResponseAcceptsNumericBalance(t *testing.T) {
+	var response TGXConnectResponse
+	if err := json.Unmarshal([]byte(`{"shop_name":"TGX Shop","balance":88.5}`), &response); err != nil {
+		t.Fatalf("unmarshal numeric balance: %v", err)
+	}
+	if response.ShopName != "TGX Shop" || response.Balance != "88.5" {
+		t.Fatalf("unexpected connect response: %+v", response)
+	}
+}
+
 func TestTGXClientListItems(t *testing.T) {
 	server := newTGXTestServer(t, func(r *http.Request) interface{} {
 		assertTGXPath(t, r, "/commodity/items")

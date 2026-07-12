@@ -64,6 +64,24 @@ type TGXConnectResponse struct {
 	Balance  string `json:"balance,omitempty"`
 }
 
+func (r *TGXConnectResponse) UnmarshalJSON(data []byte) error {
+	type connectAlias TGXConnectResponse
+	var decoded struct {
+		*connectAlias
+		Balance json.RawMessage `json:"balance"`
+	}
+	decoded.connectAlias = (*connectAlias)(r)
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	balance, err := decodeTGXStringOrNumber(decoded.Balance)
+	if err != nil {
+		return err
+	}
+	r.Balance = balance
+	return nil
+}
+
 type TGXCommodity struct {
 	ID              json.Number     `json:"id,omitempty"`
 	Code            string          `json:"code"`
