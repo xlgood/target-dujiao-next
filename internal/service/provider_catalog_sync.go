@@ -24,15 +24,15 @@ type ProviderCatalogSyncInput struct {
 }
 
 type ProviderCatalogSyncResult struct {
-	FansGurusPulled    int
-	TGXPulled          int
-	SupportedPlatforms []string
-	FilteredTelegram   int
-	FilteredInactive   int
-	FilteredPlatform   int
-	Imported           int
-	Skipped            int
-	Deactivated        int
+	FansGurusPulled    int      `json:"fans_gurus_pulled"`
+	TGXPulled          int      `json:"tgx_pulled"`
+	SupportedPlatforms []string `json:"supported_platforms"`
+	FilteredTelegram   int      `json:"filtered_telegram"`
+	FilteredInactive   int      `json:"filtered_inactive"`
+	FilteredPlatform   int      `json:"filtered_platform"`
+	Imported           int      `json:"imported"`
+	Skipped            int      `json:"skipped"`
+	Deactivated        int      `json:"deactivated"`
 }
 
 func (s *ProductMappingService) SyncProviderCatalogWithClients(
