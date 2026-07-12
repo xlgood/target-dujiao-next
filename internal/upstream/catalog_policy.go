@@ -132,6 +132,7 @@ func NewTGXCatalogItem(commodity TGXCommodity) (ProviderCatalogItem, error) {
 		Provider:           CatalogProviderTGX,
 		Code:               commodity.Code,
 		Name:               commodity.Name,
+		Category:           commodity.Category,
 		Description:        commodity.Description,
 		RawText:            []string{string(commodity.Config), string(commodity.Widget)},
 		UpstreamPrice:      commodity.Price,
@@ -337,6 +338,7 @@ func parseTGXConfigEntries(raw json.RawMessage) map[string]string {
 	if text == "" || text == "null" {
 		return result
 	}
+	text = decodeJSONStringValue(text)
 
 	var object map[string]interface{}
 	if err := json.Unmarshal(raw, &object); err == nil {
@@ -392,14 +394,15 @@ func parseTGXWidgetFields(raw json.RawMessage) []map[string]interface{} {
 	if text == "" || text == "null" {
 		return []map[string]interface{}{}
 	}
+	text = decodeJSONStringValue(text)
 
 	var list []map[string]interface{}
-	if err := json.Unmarshal(raw, &list); err == nil {
+	if err := json.Unmarshal([]byte(text), &list); err == nil {
 		return normalizeTGXWidgetFieldList(list)
 	}
 
 	var object map[string]interface{}
-	if err := json.Unmarshal(raw, &object); err == nil {
+	if err := json.Unmarshal([]byte(text), &object); err == nil {
 		if nested, ok := object["fields"].([]interface{}); ok {
 			list = make([]map[string]interface{}, 0, len(nested))
 			for _, rawItem := range nested {
@@ -415,6 +418,14 @@ func parseTGXWidgetFields(raw json.RawMessage) []map[string]interface{} {
 	return []map[string]interface{}{}
 }
 
+func decodeJSONStringValue(text string) string {
+	var decoded string
+	if err := json.Unmarshal([]byte(text), &decoded); err == nil {
+		return decoded
+	}
+	return text
+}
+
 func normalizeTGXWidgetFieldList(list []map[string]interface{}) []map[string]interface{} {
 	fields := make([]map[string]interface{}, 0, len(list))
 	for _, item := range list {
@@ -426,7 +437,7 @@ func normalizeTGXWidgetFieldList(list []map[string]interface{}) []map[string]int
 		if fieldType == "" {
 			fieldType = "text"
 		}
-		label := firstStringValue(item, "label", "title", "name")
+		label := firstStringValue(item, "label", "title", "cn", "name")
 		if label == "" {
 			label = key
 		}

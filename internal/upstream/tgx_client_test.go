@@ -92,6 +92,46 @@ func TestTGXClientListItems(t *testing.T) {
 	}
 }
 
+func TestTGXClientListItemsFlattensDocumentedCategories(t *testing.T) {
+	server := newTGXTestServer(t, func(r *http.Request) interface{} {
+		assertTGXPath(t, r, "/commodity/items")
+		if got := r.FormValue("app_key"); got != "app-secret" {
+			t.Fatalf("app_key=%q, want app-secret", got)
+		}
+		return map[string]interface{}{
+			"code": 200,
+			"data": []map[string]interface{}{
+				{
+					"name": "Instagram",
+					"children": []map[string]interface{}{
+						{"code": "IG-001", "name": "Aged account", "price": "100.00", "minimum": 1},
+					},
+				},
+			},
+		}
+	})
+	defer server.Close()
+
+	resp, err := NewTGXClient(server.URL, "test-app-id", "app-secret").ListItems(context.Background())
+	if err != nil {
+		t.Fatalf("ListItems: %v", err)
+	}
+	if len(resp.Items) != 1 || resp.Items[0].Code != "IG-001" || resp.Items[0].Category != "Instagram" {
+		t.Fatalf("unexpected category catalog response: %+v", resp)
+	}
+}
+
+func TestDecodeTGXCatalogCategoriesFlattensChildren(t *testing.T) {
+	payload := []byte(`[{"name":"Instagram","children":[{"code":"IG-001","name":"Aged account","price":"100.00"}]}]`)
+	items, categories, ok := decodeTGXCatalogCategories(payload)
+	if !ok || len(categories) == 0 {
+		t.Fatalf("catalog was not recognized: ok=%v categories=%s", ok, categories)
+	}
+	if len(items) != 1 || items[0].Code != "IG-001" || items[0].Category != "Instagram" {
+		t.Fatalf("unexpected flattened items: %+v", items)
+	}
+}
+
 func TestTGXClientInventoryTradeAndQuery(t *testing.T) {
 	server := newTGXTestServer(t, func(r *http.Request) interface{} {
 		switch r.URL.Path {

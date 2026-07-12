@@ -1,6 +1,9 @@
 package upstream
 
-import "testing"
+import (
+	"encoding/json"
+	"testing"
+)
 
 func TestNormalizePlatformAliases(t *testing.T) {
 	cases := []struct {
@@ -186,5 +189,27 @@ func TestNewTGXCatalogItemParsesConfigVariantsAndWidget(t *testing.T) {
 	}
 	if fields[0]["key"] != "email" || fields[0]["required"] != true {
 		t.Fatalf("unexpected field: %+v", fields[0])
+	}
+}
+
+func TestNewTGXCatalogItemParsesDocumentedStringFields(t *testing.T) {
+	item, err := NewTGXCatalogItem(TGXCommodity{
+		Code:     "IG-001",
+		Category: "Instagram",
+		Name:     "Aged account",
+		Price:    "100.00",
+		Config:   json.RawMessage(`"category[Standard]=100.00\ncategory[Premium]=200.00"`),
+		Widget:   json.RawMessage(`"[{\"cn\":\"Email\",\"name\":\"email\",\"type\":\"input\"}]"`),
+		Minimum:  1,
+	})
+	if err != nil {
+		t.Fatalf("NewTGXCatalogItem: %v", err)
+	}
+	if item.Category != "Instagram" || len(item.Variants) != 2 {
+		t.Fatalf("unexpected item: %+v", item)
+	}
+	fields, _ := item.ManualSchema["fields"].([]map[string]interface{})
+	if len(fields) != 1 || fields[0]["label"] != "Email" {
+		t.Fatalf("unexpected manual schema: %+v", item.ManualSchema)
 	}
 }

@@ -68,6 +68,7 @@ type TGXCommodity struct {
 	ID              json.Number     `json:"id,omitempty"`
 	Code            string          `json:"code"`
 	Name            string          `json:"name"`
+	Category        string          `json:"-"`
 	Description     string          `json:"description,omitempty"`
 	Price           string          `json:"price"`
 	UserPrice       string          `json:"user_price,omitempty"`
@@ -88,6 +89,11 @@ type TGXItemsResponse struct {
 	Items      []TGXCommodity  `json:"items,omitempty"`
 	Categories json.RawMessage `json:"categories,omitempty"`
 	Raw        json.RawMessage `json:"-"`
+}
+
+type tgxCatalogCategory struct {
+	Name     string         `json:"name"`
+	Children []TGXCommodity `json:"children"`
 }
 
 type TGXInventoryResponse struct {
@@ -247,6 +253,7 @@ func TGXTargetPrice(price string) (string, error) {
 func (c *TGXClient) postForm(ctx context.Context, path string, values url.Values, result interface{}) error {
 	values = cloneURLValues(values)
 	values.Set("app_id", c.appID)
+	values.Set("app_key", c.appKey)
 	values.Set("sign", SignTGX(values, c.appKey))
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+path, strings.NewReader(values.Encode()))
@@ -337,6 +344,11 @@ func decodeTGXResponse(body []byte, appKey string, result interface{}) error {
 			itemsResp.Items = wrapper.List
 			return nil
 		}
+		if items, categories, ok := decodeTGXCatalogCategories(payload); ok {
+			itemsResp.Items = items
+			itemsResp.Categories = append(itemsResp.Categories[:0], categories...)
+			return nil
+		}
 	}
 	if invResp, ok := result.(*TGXInventoryResponse); ok {
 		invResp.Raw = append(invResp.Raw[:0], payload...)
@@ -348,6 +360,24 @@ func decodeTGXResponse(body []byte, appKey string, result interface{}) error {
 		}
 	}
 	return nil
+}
+
+// decodeTGXCatalogCategories handles TGX's documented catalog shape: an
+// outer category array whose children contain the purchasable products.
+func decodeTGXCatalogCategories(payload []byte) ([]TGXCommodity, json.RawMessage, bool) {
+	var categories []tgxCatalogCategory
+	if err := json.Unmarshal(payload, &categories); err != nil || categories == nil {
+		return nil, nil, false
+	}
+
+	items := make([]TGXCommodity, 0)
+	for _, category := range categories {
+		for _, item := range category.Children {
+			item.Category = category.Name
+			items = append(items, item)
+		}
+	}
+	return items, append(json.RawMessage(nil), payload...), true
 }
 
 func normalizeTGXCode(raw interface{}) string {
