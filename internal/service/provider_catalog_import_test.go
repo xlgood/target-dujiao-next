@@ -198,6 +198,9 @@ func TestImportProviderCatalogRefreshesExistingMapping(t *testing.T) {
 	if product.PriceAmount.String() != "12.00" || product.MinPurchaseQuantity != 1000 || len(product.SKUs) != 1 || product.SKUs[0].PriceAmount.String() != "12.00" {
 		t.Fatalf("existing catalog row was not refreshed: product=%+v skus=%+v", product, product.SKUs)
 	}
+	if len(product.Tags) != 1 || product.Tags[0] != "instagram" {
+		t.Fatalf("public tags leaked provider or platform: %v", product.Tags)
+	}
 }
 
 func TestImportProviderCatalogCreatesTGXRaceSKUsAndWidgetSchema(t *testing.T) {

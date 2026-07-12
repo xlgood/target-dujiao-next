@@ -130,7 +130,7 @@ func (s *ProductMappingService) importProviderCatalogItemInTx(tx *gorm.DB, conne
 		PriceQuantityBasis:   providerCatalogPriceQuantityBasis(item),
 		CostPriceAmount:      models.NewMoneyFromDecimal(cost),
 		Images:               models.StringArray{},
-		Tags:                 models.StringArray{platform, item.Provider},
+		Tags:                 models.StringArray{platform},
 		PurchaseType:         constants.ProductPurchaseMember,
 		MinPurchaseQuantity:  item.MinQuantity,
 		MaxPurchaseQuantity:  item.MaxQuantity,
@@ -200,13 +200,16 @@ func (s *ProductMappingService) refreshProviderCatalogItemInTx(tx *gorm.DB, mapp
 		return err
 	}
 	product.CategoryID = category.ID
+	product.TitleJSON = localizedText(item.Name)
+	product.DescriptionJSON = localizedText(item.Description)
+	product.ContentJSON = localizedText(item.Description)
 	product.PriceAmount = models.NewMoneyFromDecimal(price)
 	product.PriceQuantityBasis = providerCatalogPriceQuantityBasis(item)
 	product.CostPriceAmount = models.NewMoneyFromDecimal(cost)
 	product.MinPurchaseQuantity = item.MinQuantity
 	product.MaxPurchaseQuantity = item.MaxQuantity
 	product.ManualFormSchemaJSON = providerCatalogManualFormSchema(item)
-	product.Tags = models.StringArray{platform, item.Provider}
+	product.Tags = models.StringArray{platform}
 	product.IsMapped = true
 	if err := productRepo.Update(product); err != nil {
 		return err

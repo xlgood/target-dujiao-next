@@ -26,6 +26,37 @@ func TestNormalizePlatformAliases(t *testing.T) {
 	}
 }
 
+func TestProviderCatalogPlatformPrefersTitleAndRejectsUnsupportedTitles(t *testing.T) {
+	cases := []struct {
+		name string
+		item ProviderCatalogItem
+		want string
+	}{
+		{
+			name: "title wins over unrelated category",
+			item: ProviderCatalogItem{Name: "Instagram aged account", Category: "Facebook"},
+			want: "instagram",
+		},
+		{
+			name: "gmail is not misclassified by category",
+			item: ProviderCatalogItem{Name: "Gmail account", Category: "YouTube", Description: "Facebook recovery"},
+			want: "",
+		},
+		{
+			name: "category fallback remains supported",
+			item: ProviderCatalogItem{Name: "Aged account", Category: "Facebook"},
+			want: "facebook",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.item.Platform(); got != tc.want {
+				t.Fatalf("Platform()=%q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestContainsTelegramCatalogText(t *testing.T) {
 	cases := []struct {
 		name string
@@ -211,5 +242,20 @@ func TestNewTGXCatalogItemParsesDocumentedStringFields(t *testing.T) {
 	fields, _ := item.ManualSchema["fields"].([]map[string]interface{})
 	if len(fields) != 1 || fields[0]["label"] != "Email" {
 		t.Fatalf("unexpected manual schema: %+v", item.ManualSchema)
+	}
+}
+
+func TestNewTGXCatalogItemNormalizesFacelookTitle(t *testing.T) {
+	item, err := NewTGXCatalogItem(TGXCommodity{
+		Code:     "FB-001",
+		Name:     "Facelook aged account",
+		Category: "Facebook",
+		Price:    "100.00",
+	})
+	if err != nil {
+		t.Fatalf("NewTGXCatalogItem: %v", err)
+	}
+	if item.Name != "Facebook aged account" || item.Platform() != "facebook" {
+		t.Fatalf("unexpected normalized item: %+v", item)
 	}
 }

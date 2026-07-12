@@ -15,7 +15,14 @@ const (
 )
 
 var (
-	tgTokenRE = regexp.MustCompile(`(?i)(^|[^a-z0-9])tg([^a-z0-9]|$)`)
+	tgTokenRE  = regexp.MustCompile(`(?i)(^|[^a-z0-9])tg([^a-z0-9]|$)`)
+	facelookRE = regexp.MustCompile(`(?i)\bfacelook\b`)
+
+	platformOrder           = []string{"instagram", "tiktok", "facebook", "youtube", "x"}
+	unsupportedTitleAliases = []string{
+		"gmail", "google mail", "google account", "outlook", "hotmail", "yahoo mail",
+		"discord", "linkedin", "reddit", "threads", "apple id", "chatgpt",
+	}
 
 	platformAliases = map[string][]string{
 		"x": {
@@ -131,7 +138,7 @@ func NewTGXCatalogItem(commodity TGXCommodity) (ProviderCatalogItem, error) {
 	return ProviderCatalogItem{
 		Provider:           CatalogProviderTGX,
 		Code:               commodity.Code,
-		Name:               commodity.Name,
+		Name:               normalizeProviderTitle(commodity.Name),
 		Category:           commodity.Category,
 		Description:        commodity.Description,
 		RawText:            []string{string(commodity.Config), string(commodity.Widget)},
@@ -211,10 +218,8 @@ func NormalizePlatform(parts ...string) string {
 	if ContainsTelegramCatalogText(text) {
 		return "telegram"
 	}
-	for platform, aliases := range platformAliases {
-		if platform == "telegram" {
-			continue
-		}
+	for _, platform := range platformOrder {
+		aliases := platformAliases[platform]
 		for _, alias := range aliases {
 			if catalogTextContainsAlias(text, alias) {
 				return platform
@@ -240,10 +245,27 @@ func ContainsTelegramCatalogText(parts ...string) bool {
 }
 
 func (i ProviderCatalogItem) Platform() string {
-	parts := []string{i.Category, i.Name, i.Description, i.Code, i.Type}
-	parts = append(parts, i.Tags...)
-	parts = append(parts, i.RawText...)
-	return NormalizePlatform(parts...)
+	if platform := NormalizePlatform(i.Name); platform != "" {
+		return platform
+	}
+	if containsUnsupportedPlatformTitle(i.Name) {
+		return ""
+	}
+	return NormalizePlatform(i.Category)
+}
+
+func normalizeProviderTitle(title string) string {
+	return facelookRE.ReplaceAllString(strings.TrimSpace(title), "Facebook")
+}
+
+func containsUnsupportedPlatformTitle(title string) bool {
+	text := normalizeCatalogText(title)
+	for _, alias := range unsupportedTitleAliases {
+		if catalogTextContainsAlias(text, alias) {
+			return true
+		}
+	}
+	return false
 }
 
 func (i ProviderCatalogItem) ContainsTelegram() bool {
