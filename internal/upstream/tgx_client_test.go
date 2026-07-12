@@ -122,13 +122,16 @@ func TestTGXClientListItemsFlattensDocumentedCategories(t *testing.T) {
 }
 
 func TestDecodeTGXCatalogCategoriesFlattensChildren(t *testing.T) {
-	payload := []byte(`[{"name":"Instagram","children":[{"code":"IG-001","name":"Aged account","price":"100.00"}]}]`)
+	payload := []byte(`[{"name":"Instagram","children":[{"id":101,"code":"IG-001","shared_code":"SHARED-001","name":"Aged account","price":100,"user_price":95.5,"factory_price":90,"delivery_way":0,"contact_type":0,"password_status":0,"draft_status":0,"inventory_hidden":0,"minimum":1,"config":"category[Standard]=100.00","widget":"[]"}]}]`)
 	items, categories, ok := decodeTGXCatalogCategories(payload)
 	if !ok || len(categories) == 0 {
 		t.Fatalf("catalog was not recognized: ok=%v categories=%s", ok, categories)
 	}
 	if len(items) != 1 || items[0].Code != "IG-001" || items[0].Category != "Instagram" {
 		t.Fatalf("unexpected flattened items: %+v", items)
+	}
+	if items[0].Price != "100" || items[0].UserPrice != "95.5" || items[0].DeliveryWay != "0" {
+		t.Fatalf("numeric fields were not normalized: %+v", items[0])
 	}
 }
 

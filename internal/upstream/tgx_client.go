@@ -85,6 +85,63 @@ type TGXCommodity struct {
 	PurchaseCount   int             `json:"purchase_count,omitempty"`
 }
 
+func (c *TGXCommodity) UnmarshalJSON(data []byte) error {
+	type commodityAlias TGXCommodity
+	var decoded struct {
+		*commodityAlias
+		Price           json.RawMessage `json:"price"`
+		UserPrice       json.RawMessage `json:"user_price"`
+		FactoryPrice    json.RawMessage `json:"factory_price"`
+		DeliveryWay     json.RawMessage `json:"delivery_way"`
+		ContactType     json.RawMessage `json:"contact_type"`
+		PasswordStatus  json.RawMessage `json:"password_status"`
+		DraftStatus     json.RawMessage `json:"draft_status"`
+		InventoryHidden json.RawMessage `json:"inventory_hidden"`
+	}
+	decoded.commodityAlias = (*commodityAlias)(c)
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+
+	var err error
+	for _, field := range []struct {
+		raw  json.RawMessage
+		dest *string
+	}{
+		{decoded.Price, &c.Price},
+		{decoded.UserPrice, &c.UserPrice},
+		{decoded.FactoryPrice, &c.FactoryPrice},
+		{decoded.DeliveryWay, &c.DeliveryWay},
+		{decoded.ContactType, &c.ContactType},
+		{decoded.PasswordStatus, &c.PasswordStatus},
+		{decoded.DraftStatus, &c.DraftStatus},
+		{decoded.InventoryHidden, &c.InventoryHidden},
+	} {
+		*field.dest, err = decodeTGXStringOrNumber(field.raw)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func decodeTGXStringOrNumber(raw json.RawMessage) (string, error) {
+	if len(raw) == 0 || string(raw) == "null" {
+		return "", nil
+	}
+	var text string
+	if err := json.Unmarshal(raw, &text); err == nil {
+		return text, nil
+	}
+	var number json.Number
+	decoder := json.NewDecoder(strings.NewReader(string(raw)))
+	decoder.UseNumber()
+	if err := decoder.Decode(&number); err != nil {
+		return "", fmt.Errorf("decode tgx scalar %s: %w", string(raw), err)
+	}
+	return number.String(), nil
+}
+
 type TGXItemsResponse struct {
 	Items      []TGXCommodity  `json:"items,omitempty"`
 	Categories json.RawMessage `json:"categories,omitempty"`
