@@ -245,6 +245,9 @@ func ContainsTelegramCatalogText(parts ...string) bool {
 }
 
 func (i ProviderCatalogItem) Platform() string {
+	if unsupportedPlatformPrecedesSupportedPlatform(i.Name) {
+		return ""
+	}
 	if platform := NormalizePlatform(i.Name); platform != "" {
 		return platform
 	}
@@ -252,6 +255,45 @@ func (i ProviderCatalogItem) Platform() string {
 		return ""
 	}
 	return NormalizePlatform(i.Category)
+}
+
+func unsupportedPlatformPrecedesSupportedPlatform(title string) bool {
+	text := normalizeCatalogText(title)
+	unsupportedIndex := firstCatalogAliasIndex(text, unsupportedTitleAliases)
+	if unsupportedIndex < 0 {
+		return false
+	}
+	supportedIndex := -1
+	for _, aliases := range platformAliases {
+		index := firstCatalogAliasIndex(text, aliases)
+		if index >= 0 && (supportedIndex < 0 || index < supportedIndex) {
+			supportedIndex = index
+		}
+	}
+	return supportedIndex < 0 || unsupportedIndex <= supportedIndex
+}
+
+func firstCatalogAliasIndex(text string, aliases []string) int {
+	first := -1
+	for _, alias := range aliases {
+		alias = normalizeCatalogText(alias)
+		if alias == "" {
+			continue
+		}
+		index := -1
+		if len(alias) <= 2 && isASCIIAlphaNum(alias) {
+			pattern := regexp.MustCompile(`(^|[^a-z0-9])` + regexp.QuoteMeta(alias) + `([^a-z0-9]|$)`)
+			if match := pattern.FindStringIndex(text); match != nil {
+				index = match[0]
+			}
+		} else {
+			index = strings.Index(text, alias)
+		}
+		if index >= 0 && (first < 0 || index < first) {
+			first = index
+		}
+	}
+	return first
 }
 
 func normalizeProviderTitle(title string) string {

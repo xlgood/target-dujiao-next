@@ -43,6 +43,21 @@ func TestProviderCatalogPlatformPrefersTitleAndRejectsUnsupportedTitles(t *testi
 			want: "",
 		},
 		{
+			name: "gmail mentioning youtube remains unsupported",
+			item: ProviderCatalogItem{Name: "2024 Gmail account with 2FA, supports ads and YouTube", Category: "YouTube"},
+			want: "",
+		},
+		{
+			name: "gmail mentioning yt remains unsupported",
+			item: ProviderCatalogItem{Name: "GMAIL aged account, unused ADS, YT and MAPS", Category: "YouTube"},
+			want: "",
+		},
+		{
+			name: "facebook account may mention hotmail verification",
+			item: ProviderCatalogItem{Name: "FB aged account with Hotmail verification", Category: "Facebook"},
+			want: "facebook",
+		},
+		{
 			name: "category fallback remains supported",
 			item: ProviderCatalogItem{Name: "Aged account", Category: "Facebook"},
 			want: "facebook",
