@@ -285,6 +285,28 @@ func (h *Handler) SyncProductMapping(c *gin.Context) {
 	response.Success(c, gin.H{"synced": true})
 }
 
+// RefreshTGXMappingInventory refreshes real-time inventory for one TGX item.
+func (h *Handler) RefreshTGXMappingInventory(c *gin.Context) {
+	id, err := shared.ParseParamUint(c, "id")
+	if err != nil {
+		shared.RespondError(c, response.CodeBadRequest, "error.bad_request", err)
+		return
+	}
+	if err := h.ProductMappingService.RefreshTGXInventory(id); err != nil {
+		if errors.Is(err, service.ErrMappingNotFound) {
+			shared.RespondError(c, response.CodeNotFound, "error.mapping_not_found", nil)
+			return
+		}
+		if errors.Is(err, service.ErrProviderCatalogSyncRequired) {
+			shared.RespondError(c, response.CodeBadRequest, "error.tgx_inventory_only", nil)
+			return
+		}
+		shared.RespondError(c, response.CodeInternal, "error.tgx_inventory_refresh_failed", err)
+		return
+	}
+	response.Success(c, gin.H{"refreshed": true})
+}
+
 // UpdateProductMappingStatusRequest 更新映射状态请求
 type UpdateProductMappingStatusRequest struct {
 	IsActive bool `json:"is_active"`

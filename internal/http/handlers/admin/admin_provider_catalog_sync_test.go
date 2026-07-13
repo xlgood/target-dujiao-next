@@ -72,11 +72,13 @@ func setupAdminProviderCatalogSyncHandlerTest(t *testing.T) (*Handler, *gorm.DB,
 		t.Fatalf("create fansgurus connection failed: %v", err)
 	}
 	tgxConn, err := connService.Create(service.CreateConnectionInput{
-		Name:      "TGX",
-		BaseURL:   "https://tgx.example/shared",
-		ApiKey:    "tgx-app-id",
-		ApiSecret: "tgx-app-key",
-		Protocol:  constants.ConnectionProtocolTGXAccount,
+		Name:               "TGX",
+		BaseURL:            "https://tgx.example/shared",
+		ApiKey:             "tgx-app-id",
+		ApiSecret:          "tgx-app-key",
+		Protocol:           constants.ConnectionProtocolTGXAccount,
+		ExchangeRate:       0.14,
+		PriceMarkupPercent: 20,
 	})
 	if err != nil {
 		t.Fatalf("create tgx connection failed: %v", err)

@@ -188,8 +188,8 @@ func TestProviderCatalogItemPriceRules(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewTGXCatalogItem: %v", err)
 	}
-	if tgxItem.TargetPrice != "120.00000000" {
-		t.Fatalf("tgx target=%s, want 120.00000000", tgxItem.TargetPrice)
+	if tgxItem.TargetPrice != "100.00" {
+		t.Fatalf("tgx target=%s, want 100.00", tgxItem.TargetPrice)
 	}
 	if tgxItem.PriceQuantityBasis != 1 {
 		t.Fatalf("tgx price quantity basis=%d, want 1", tgxItem.PriceQuantityBasis)
@@ -228,10 +228,10 @@ func TestNewTGXCatalogItemParsesConfigVariantsAndWidget(t *testing.T) {
 	if len(item.Variants) != 2 {
 		t.Fatalf("variant count=%d, want 2: %+v", len(item.Variants), item.Variants)
 	}
-	if item.Variants[0].Name != "普通" || item.Variants[0].TargetPrice != "120.00000000" {
+	if item.Variants[0].Name != "普通" || item.Variants[0].TargetPrice != "100.00" {
 		t.Fatalf("unexpected first variant: %+v", item.Variants[0])
 	}
-	if item.Variants[1].Name != "高级" || item.Variants[1].TargetPrice != "180.00000000" {
+	if item.Variants[1].Name != "高级" || item.Variants[1].TargetPrice != "150.00" {
 		t.Fatalf("unexpected second variant: %+v", item.Variants[1])
 	}
 	fields, ok := item.ManualSchema["fields"].([]map[string]interface{})

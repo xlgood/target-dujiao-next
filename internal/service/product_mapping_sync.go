@@ -483,6 +483,76 @@ func (s *ProductMappingService) ensureTGXInventoryForOrder(conn *models.SiteConn
 	return nil
 }
 
+// RefreshTGXInventory refreshes the cached inventory of one TGX catalog
+// mapping. The catalog endpoint does not expose a reliable stock count, so
+// this intentionally runs on demand instead of issuing thousands of requests
+// during every catalog import.
+func (s *ProductMappingService) RefreshTGXInventory(mappingID uint) error {
+	if s == nil || s.mappingRepo == nil || s.skuMappingRepo == nil || s.connService == nil {
+		return errorsProductMappingDependencyMissing()
+	}
+	mapping, err := s.mappingRepo.GetByID(mappingID)
+	if err != nil {
+		return err
+	}
+	if mapping == nil {
+		return ErrMappingNotFound
+	}
+	if mapping.Provider != upstream.CatalogProviderTGX {
+		return ErrProviderCatalogSyncRequired
+	}
+	conn, err := s.connService.GetByID(mapping.ConnectionID)
+	if err != nil {
+		return err
+	}
+	if conn == nil {
+		return ErrConnectionNotFound
+	}
+	appKey, err := s.connService.DecryptSecret(conn.ApiSecret)
+	if err != nil {
+		return err
+	}
+	skuMappings, err := s.skuMappingRepo.ListByProductMapping(mapping.ID)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	client := upstream.NewTGXClient(conn.BaseURL, conn.ApiKey, appKey)
+	now := time.Now()
+	for i := range skuMappings {
+		sharedCode, race := splitTGXUpstreamSKUCode(skuMappings[i].UpstreamSKUCode)
+		if sharedCode == "" {
+			return fmt.Errorf("invalid TGX shared code for SKU mapping %d", skuMappings[i].ID)
+		}
+		inventory, err := client.GetInventory(ctx, sharedCode, race)
+		if err != nil {
+			return fmt.Errorf("get TGX inventory for %s: %w", sharedCode, err)
+		}
+		state, err := client.GetInventoryState(ctx, sharedCode, race, 1)
+		if err != nil {
+			return fmt.Errorf("get TGX inventory state for %s: %w", sharedCode, err)
+		}
+		skuMappings[i].StockSyncedAt = &now
+		skuMappings[i].UpstreamIsActive = state != nil && state.Available
+		switch {
+		case state == nil || !state.Available:
+			skuMappings[i].UpstreamStock = 0
+		case inventory != nil && inventory.Stock > 0:
+			skuMappings[i].UpstreamStock = inventory.Stock
+		default:
+			// TGX returns zero for inventory-hidden goods. inventoryState is
+			// authoritative for whether one unit can be purchased in that case.
+			skuMappings[i].UpstreamStock = -1
+		}
+		if err := s.skuMappingRepo.Update(&skuMappings[i]); err != nil {
+			return err
+		}
+	}
+	mapping.LastSyncedAt = &now
+	return s.mappingRepo.Update(mapping)
+}
+
 // fullSyncIntervalFloor 强制全量同步的下限：任何情况下两次全量间隔至少 24h，
 // 用于发现上游下架/删除（增量模式下这些商品不会再次出现在 updated_after 之后的列表里）。
 const fullSyncIntervalFloor = 24 * time.Hour

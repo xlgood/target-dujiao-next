@@ -72,13 +72,13 @@ func (s *ProductMappingService) importProviderCatalogItem(connectionID uint, ite
 	if platform == "" {
 		return false, false, nil
 	}
-	price, err := decimal.NewFromString(item.TargetPrice)
+	conn, err := s.providerCatalogConnection(connectionID, item.Provider)
 	if err != nil {
-		return false, false, fmt.Errorf("parse target price for %s:%s: %w", item.Provider, item.Code, err)
+		return false, false, err
 	}
-	cost, err := decimal.NewFromString(item.UpstreamPrice)
+	price, cost, err := providerCatalogAmounts(item.Provider, item.UpstreamPrice, item.TargetPrice, conn)
 	if err != nil {
-		cost = decimal.Zero
+		return false, false, fmt.Errorf("calculate catalog price for %s:%s: %w", item.Provider, item.Code, err)
 	}
 
 	var created bool
@@ -91,9 +91,9 @@ func (s *ProductMappingService) importProviderCatalogItem(connectionID uint, ite
 		}
 		if existing != nil {
 			updated = true
-			return s.refreshProviderCatalogItemInTx(tx, existing, item, platform, price, cost)
+			return s.refreshProviderCatalogItemInTx(tx, existing, item, platform, price, cost, conn)
 		}
-		return s.importProviderCatalogItemInTx(tx, connectionID, item, platform, price, cost, &created)
+		return s.importProviderCatalogItemInTx(tx, connectionID, item, platform, price, cost, conn, &created)
 	})
 	if err != nil {
 		return false, false, err
@@ -101,7 +101,7 @@ func (s *ProductMappingService) importProviderCatalogItem(connectionID uint, ite
 	return created, updated, nil
 }
 
-func (s *ProductMappingService) importProviderCatalogItemInTx(tx *gorm.DB, connectionID uint, item upstream.ProviderCatalogItem, platform string, price decimal.Decimal, cost decimal.Decimal, imported *bool) error {
+func (s *ProductMappingService) importProviderCatalogItemInTx(tx *gorm.DB, connectionID uint, item upstream.ProviderCatalogItem, platform string, price decimal.Decimal, cost decimal.Decimal, conn *models.SiteConnection, imported *bool) error {
 	productRepo := s.productRepo.WithTx(tx)
 	productSKURepo := s.productSKURepo.WithTx(tx)
 	mappingRepo := s.mappingRepo.WithTx(tx)
@@ -171,7 +171,7 @@ func (s *ProductMappingService) importProviderCatalogItemInTx(tx *gorm.DB, conne
 		}}
 	}
 	for _, variant := range variants {
-		if err := s.createProviderVariantSKU(productSKURepo, skuMappingRepo, product.ID, mapping.ID, item, variant, platform, now); err != nil {
+		if err := s.createProviderVariantSKU(productSKURepo, skuMappingRepo, product.ID, mapping.ID, item, variant, platform, conn, now); err != nil {
 			return err
 		}
 	}
@@ -180,7 +180,7 @@ func (s *ProductMappingService) importProviderCatalogItemInTx(tx *gorm.DB, conne
 	return nil
 }
 
-func (s *ProductMappingService) refreshProviderCatalogItemInTx(tx *gorm.DB, mapping *models.ProductMapping, item upstream.ProviderCatalogItem, platform string, price, cost decimal.Decimal) error {
+func (s *ProductMappingService) refreshProviderCatalogItemInTx(tx *gorm.DB, mapping *models.ProductMapping, item upstream.ProviderCatalogItem, platform string, price, cost decimal.Decimal, conn *models.SiteConnection) error {
 	if mapping == nil || mapping.LocalProductID == 0 {
 		return ErrMappingNotFound
 	}
@@ -225,35 +225,31 @@ func (s *ProductMappingService) refreshProviderCatalogItemInTx(tx *gorm.DB, mapp
 	}
 	now := time.Now()
 	for _, variant := range variants {
-		if err := s.refreshProviderVariantSKU(productSKURepo, skuMappingRepo, product.ID, mapping.ID, item, variant, platform, now); err != nil {
+		if err := s.refreshProviderVariantSKU(productSKURepo, skuMappingRepo, product.ID, mapping.ID, item, variant, platform, conn, now); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (s *ProductMappingService) refreshProviderVariantSKU(productSKURepo repository.ProductSKURepository, skuMappingRepo repository.SKUMappingRepository, productID, mappingID uint, item upstream.ProviderCatalogItem, variant upstream.ProviderCatalogVariant, platform string, now time.Time) error {
+func (s *ProductMappingService) refreshProviderVariantSKU(productSKURepo repository.ProductSKURepository, skuMappingRepo repository.SKUMappingRepository, productID, mappingID uint, item upstream.ProviderCatalogItem, variant upstream.ProviderCatalogVariant, platform string, conn *models.SiteConnection, now time.Time) error {
 	skuMapping, err := skuMappingRepo.GetByMappingAndUpstreamSKUCode(mappingID, variant.Code)
 	if err != nil {
 		return err
 	}
 	if skuMapping == nil {
-		return s.createProviderVariantSKU(productSKURepo, skuMappingRepo, productID, mappingID, item, variant, platform, now)
+		return s.createProviderVariantSKU(productSKURepo, skuMappingRepo, productID, mappingID, item, variant, platform, conn, now)
 	}
 	sku, err := productSKURepo.GetByID(skuMapping.LocalSKUID)
 	if err != nil {
 		return err
 	}
 	if sku == nil {
-		return s.createProviderVariantSKU(productSKURepo, skuMappingRepo, productID, mappingID, item, variant, platform, now)
+		return s.createProviderVariantSKU(productSKURepo, skuMappingRepo, productID, mappingID, item, variant, platform, conn, now)
 	}
-	price, err := decimal.NewFromString(variant.TargetPrice)
+	price, cost, err := providerCatalogAmounts(item.Provider, variant.UpstreamPrice, variant.TargetPrice, conn)
 	if err != nil {
 		return err
-	}
-	cost, err := decimal.NewFromString(variant.UpstreamPrice)
-	if err != nil {
-		cost = decimal.Zero
 	}
 	sku.PriceAmount = models.NewMoneyFromDecimal(price)
 	sku.PriceQuantityBasis = providerCatalogPriceQuantityBasis(item)
@@ -262,12 +258,8 @@ func (s *ProductMappingService) refreshProviderVariantSKU(productSKURepo reposit
 	if err := productSKURepo.Update(sku); err != nil {
 		return err
 	}
-	stock := variant.Stock
-	if stock == 0 {
-		stock = -1
-	}
-	skuMapping.UpstreamPrice = models.NewMoneyFromDecimal(cost)
-	skuMapping.UpstreamStock = stock
+	skuMapping.UpstreamPrice = models.NewMoneyFromDecimal(parseProviderUpstreamPrice(variant.UpstreamPrice))
+	skuMapping.UpstreamStock = variant.Stock
 	skuMapping.UpstreamIsActive = variant.Active
 	skuMapping.StockSyncedAt = &now
 	return skuMappingRepo.Update(skuMapping)
@@ -281,16 +273,14 @@ func (s *ProductMappingService) createProviderVariantSKU(
 	item upstream.ProviderCatalogItem,
 	variant upstream.ProviderCatalogVariant,
 	platform string,
+	conn *models.SiteConnection,
 	now time.Time,
 ) error {
-	skuPrice, err := decimal.NewFromString(variant.TargetPrice)
+	skuPrice, costPrice, err := providerCatalogAmounts(item.Provider, variant.UpstreamPrice, variant.TargetPrice, conn)
 	if err != nil {
-		return fmt.Errorf("parse provider variant target price: %w", err)
+		return fmt.Errorf("calculate provider variant price: %w", err)
 	}
-	upstreamPrice, err := decimal.NewFromString(variant.UpstreamPrice)
-	if err != nil {
-		upstreamPrice = decimal.Zero
-	}
+	upstreamPrice := parseProviderUpstreamPrice(variant.UpstreamPrice)
 	skuCode := normalizeProviderSKUCode(variant.Code)
 	if skuCode == "" {
 		skuCode = models.DefaultSKUCode
@@ -301,7 +291,7 @@ func (s *ProductMappingService) createProviderVariantSKU(
 		SpecValuesJSON:     providerVariantSpecValues(item.Provider, platform, variant),
 		PriceAmount:        models.NewMoneyFromDecimal(skuPrice),
 		PriceQuantityBasis: providerCatalogPriceQuantityBasis(item),
-		CostPriceAmount:    models.NewMoneyFromDecimal(upstreamPrice),
+		CostPriceAmount:    models.NewMoneyFromDecimal(costPrice),
 		ManualStockTotal:   0,
 		IsActive:           variant.Active,
 	}
@@ -309,17 +299,13 @@ func (s *ProductMappingService) createProviderVariantSKU(
 		return fmt.Errorf("create provider sku: %w", err)
 	}
 
-	stock := variant.Stock
-	if stock == 0 {
-		stock = -1
-	}
 	skuMapping := models.SKUMapping{
 		ProductMappingID: mappingID,
 		LocalSKUID:       sku.ID,
 		UpstreamSKUID:    0,
 		UpstreamSKUCode:  variant.Code,
 		UpstreamPrice:    models.NewMoneyFromDecimal(upstreamPrice),
-		UpstreamStock:    stock,
+		UpstreamStock:    variant.Stock,
 		UpstreamIsActive: variant.Active,
 		StockSyncedAt:    &now,
 	}
@@ -327,6 +313,63 @@ func (s *ProductMappingService) createProviderVariantSKU(
 		return fmt.Errorf("create provider sku mapping: %w", err)
 	}
 	return nil
+}
+
+func (s *ProductMappingService) providerCatalogConnection(connectionID uint, provider string) (*models.SiteConnection, error) {
+	if provider != upstream.CatalogProviderTGX || s.connService == nil {
+		return nil, nil
+	}
+	conn, err := s.connService.GetByID(connectionID)
+	if err != nil {
+		return nil, err
+	}
+	if conn == nil {
+		return nil, ErrConnectionNotFound
+	}
+	return conn, nil
+}
+
+// providerCatalogAmounts returns local USD sale and cost amounts. FansGurus
+// quotes USD directly; TGX quotes CNY and must be converted via its connection.
+func providerCatalogAmounts(provider, upstreamRaw, fallbackTarget string, conn *models.SiteConnection) (decimal.Decimal, decimal.Decimal, error) {
+	upstreamPrice := parseProviderUpstreamPrice(upstreamRaw)
+	switch provider {
+	case upstream.CatalogProviderFansGurus:
+		local, err := decimal.NewFromString(fallbackTarget)
+		if err != nil {
+			return decimal.Zero, decimal.Zero, err
+		}
+		return local, upstreamPrice, nil
+	case upstream.CatalogProviderTGX:
+		if conn == nil {
+			// Keep the pure import helper backward-compatible for callers that do
+			// not have a persisted connection. Production catalog sync always
+			// supplies the TGX connection and therefore never uses this branch.
+			local, err := decimal.NewFromString(fallbackTarget)
+			if err != nil {
+				return decimal.Zero, decimal.Zero, err
+			}
+			return local, upstreamPrice, nil
+		}
+		if conn.ExchangeRate.LessThanOrEqual(decimal.Zero) || conn.ExchangeRate.GreaterThanOrEqual(decimal.NewFromInt(1)) {
+			return decimal.Zero, decimal.Zero, fmt.Errorf("TGX CNY-to-USD exchange rate must be greater than 0 and less than 1")
+		}
+		return CalculateLocalPrice(upstreamPrice, conn.ExchangeRate, conn.PriceMarkupPercent, conn.PriceRoundingMode), convertCurrency(upstreamPrice, conn.ExchangeRate).Round(2), nil
+	default:
+		local, err := decimal.NewFromString(fallbackTarget)
+		if err != nil {
+			return decimal.Zero, decimal.Zero, err
+		}
+		return local, upstreamPrice, nil
+	}
+}
+
+func parseProviderUpstreamPrice(raw string) decimal.Decimal {
+	price, err := decimal.NewFromString(raw)
+	if err != nil {
+		return decimal.Zero
+	}
+	return price
 }
 
 func providerCatalogPriceQuantityBasis(item upstream.ProviderCatalogItem) int {

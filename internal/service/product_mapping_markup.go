@@ -1,6 +1,7 @@
 package service
 
 import (
+	"fmt"
 	"strconv"
 
 	"github.com/dujiao-next/internal/models"
@@ -23,6 +24,12 @@ func (s *ProductMappingService) ReapplyMarkup(connectionID uint) (int, error) {
 	if err != nil {
 		return 0, err
 	}
+	for _, mapping := range mappings {
+		if mapping.Provider == upstream.CatalogProviderTGX &&
+			(conn.ExchangeRate.LessThanOrEqual(decimal.Zero) || conn.ExchangeRate.GreaterThanOrEqual(decimal.NewFromInt(1))) {
+			return 0, fmt.Errorf("TGX CNY-to-USD exchange rate must be greater than 0 and less than 1")
+		}
+	}
 
 	updated := 0
 	for _, mapping := range mappings {
@@ -38,7 +45,7 @@ func (s *ProductMappingService) ReapplyMarkup(connectionID uint) (int, error) {
 				continue
 			}
 			localSKU.PriceAmount = models.NewMoneyFromDecimal(newLocalPrice.Round(2))
-			localSKU.CostPriceAmount = models.NewMoneyFromDecimal(convertCurrency(sm.UpstreamPrice.Decimal, conn.ExchangeRate).Round(2)) // 成本价 = 上游价格 × 汇率（本地币种）
+			localSKU.CostPriceAmount = models.NewMoneyFromDecimal(providerMappingCostPrice(mapping.Provider, sm.UpstreamPrice.Decimal, conn))
 			_ = s.productSKURepo.Update(localSKU)
 		}
 
@@ -63,17 +70,24 @@ func providerMappingLocalPrice(provider string, upstreamPrice decimal.Decimal, c
 			}
 		}
 	case upstream.CatalogProviderTGX:
-		price, err := upstream.TGXTargetPrice(upstreamPrice.String())
-		if err == nil {
-			if parsed, parseErr := decimal.NewFromString(price); parseErr == nil {
-				return parsed
+		if conn != nil {
+			if conn.ExchangeRate.LessThanOrEqual(decimal.Zero) || conn.ExchangeRate.GreaterThanOrEqual(decimal.NewFromInt(1)) {
+				return decimal.Zero
 			}
+			return CalculateLocalPrice(upstreamPrice, conn.ExchangeRate, conn.PriceMarkupPercent, conn.PriceRoundingMode)
 		}
 	}
 	if conn == nil {
 		return upstreamPrice
 	}
 	return CalculateLocalPrice(upstreamPrice, conn.ExchangeRate, conn.PriceMarkupPercent, conn.PriceRoundingMode)
+}
+
+func providerMappingCostPrice(provider string, upstreamPrice decimal.Decimal, conn *models.SiteConnection) decimal.Decimal {
+	if provider == upstream.CatalogProviderFansGurus || conn == nil {
+		return upstreamPrice.Round(2)
+	}
+	return convertCurrency(upstreamPrice, conn.ExchangeRate).Round(2)
 }
 
 // recalcProductPrice 重新计算商品基准价格和成本价为最低活跃 SKU 价格

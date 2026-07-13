@@ -126,24 +126,22 @@ func FansGurusServiceTypeSupported(serviceType string) bool {
 }
 
 func NewTGXCatalogItem(commodity TGXCommodity) (ProviderCatalogItem, error) {
-	targetPrice, err := TGXTargetPrice(commodity.Price)
-	if err != nil {
-		return ProviderCatalogItem{}, err
-	}
 	variants, err := ParseTGXConfigVariants(commodity.Code, commodity.Price, commodity.Config)
 	if err != nil {
 		return ProviderCatalogItem{}, err
 	}
 	manualSchema := ParseTGXWidgetManualSchema(commodity.Widget)
 	return ProviderCatalogItem{
-		Provider:           CatalogProviderTGX,
-		Code:               commodity.Code,
-		Name:               normalizeProviderTitle(commodity.Name),
-		Category:           commodity.Category,
-		Description:        commodity.Description,
-		RawText:            []string{string(commodity.Config), string(commodity.Widget)},
-		UpstreamPrice:      commodity.Price,
-		TargetPrice:        targetPrice,
+		Provider:      CatalogProviderTGX,
+		Code:          commodity.Code,
+		Name:          normalizeProviderTitle(commodity.Name),
+		Category:      commodity.Category,
+		Description:   commodity.Description,
+		RawText:       []string{string(commodity.Config), string(commodity.Widget)},
+		UpstreamPrice: commodity.Price,
+		// TGX quotes prices in CNY. Conversion to the site's currency depends on
+		// the configured connection rate and happens during catalog import.
+		TargetPrice:        commodity.Price,
 		PriceQuantityBasis: 1,
 		MinQuantity:        commodity.Minimum,
 		Variants:           variants,
@@ -155,15 +153,11 @@ func NewTGXCatalogItem(commodity TGXCommodity) (ProviderCatalogItem, error) {
 func ParseTGXConfigVariants(sharedCode string, fallbackPrice string, raw json.RawMessage) ([]ProviderCatalogVariant, error) {
 	entries := parseTGXConfigEntries(raw)
 	if len(entries) == 0 {
-		target, err := TGXTargetPrice(fallbackPrice)
-		if err != nil {
-			return nil, err
-		}
 		return []ProviderCatalogVariant{{
 			Code:          sharedCode,
 			Name:          "default",
 			UpstreamPrice: fallbackPrice,
-			TargetPrice:   target,
+			TargetPrice:   fallbackPrice,
 			Stock:         -1,
 			Active:        true,
 		}}, nil
@@ -171,15 +165,11 @@ func ParseTGXConfigVariants(sharedCode string, fallbackPrice string, raw json.Ra
 
 	variants := make([]ProviderCatalogVariant, 0, len(entries))
 	for name, price := range entries {
-		target, err := TGXTargetPrice(price)
-		if err != nil {
-			return nil, fmt.Errorf("parse tgx race price %s: %w", name, err)
-		}
 		variants = append(variants, ProviderCatalogVariant{
 			Code:          sharedCode + "|" + name,
 			Name:          name,
 			UpstreamPrice: price,
-			TargetPrice:   target,
+			TargetPrice:   price,
 			Stock:         -1,
 			Active:        true,
 		})
