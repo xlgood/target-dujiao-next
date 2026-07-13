@@ -112,8 +112,7 @@ func (s *ProductMappingService) importProviderCatalogItemInTx(tx *gorm.DB, conne
 		return err
 	}
 
-	slugBase := normalizeProviderSlug(fmt.Sprintf("%s-%s-%s", item.Provider, platform, item.Code))
-	slug, err := s.uniqueProductSlug(slugBase)
+	slug, err := s.providerCatalogProductSlug(item.Provider, platform, item.Code, 0)
 	if err != nil {
 		return err
 	}
@@ -130,7 +129,7 @@ func (s *ProductMappingService) importProviderCatalogItemInTx(tx *gorm.DB, conne
 		PriceQuantityBasis:   providerCatalogPriceQuantityBasis(item),
 		CostPriceAmount:      models.NewMoneyFromDecimal(cost),
 		Images:               models.StringArray{},
-		Tags:                 models.StringArray{platform},
+		Tags:                 models.StringArray{},
 		PurchaseType:         constants.ProductPurchaseMember,
 		MinPurchaseQuantity:  item.MinQuantity,
 		MaxPurchaseQuantity:  item.MaxQuantity,
@@ -200,6 +199,11 @@ func (s *ProductMappingService) refreshProviderCatalogItemInTx(tx *gorm.DB, mapp
 		return err
 	}
 	product.CategoryID = category.ID
+	slug, err := s.providerCatalogProductSlug(item.Provider, platform, item.Code, product.ID)
+	if err != nil {
+		return err
+	}
+	product.Slug = slug
 	product.TitleJSON = localizedText(item.Name)
 	product.DescriptionJSON = localizedText(item.Description)
 	product.ContentJSON = localizedText(item.Description)
@@ -209,7 +213,7 @@ func (s *ProductMappingService) refreshProviderCatalogItemInTx(tx *gorm.DB, mapp
 	product.MinPurchaseQuantity = item.MinQuantity
 	product.MaxPurchaseQuantity = item.MaxQuantity
 	product.ManualFormSchemaJSON = providerCatalogManualFormSchema(item)
-	product.Tags = models.StringArray{platform}
+	product.Tags = models.StringArray{}
 	product.IsMapped = true
 	if err := productRepo.Update(product); err != nil {
 		return err
@@ -392,12 +396,39 @@ func providerCatalogManualFormSchema(item upstream.ProviderCatalogItem) models.J
 	return providerManualFormSchema(item.Provider)
 }
 
-func providerVariantSpecValues(provider string, platform string, variant upstream.ProviderCatalogVariant) models.JSON {
-	values := models.JSON{"provider": provider, "platform": platform}
+func providerVariantSpecValues(_ string, _ string, variant upstream.ProviderCatalogVariant) models.JSON {
+	values := models.JSON{}
 	if variant.Name != "" && variant.Name != "default" {
 		values["race"] = variant.Name
 	}
 	return values
+}
+
+func (s *ProductMappingService) providerCatalogProductSlug(provider, platform, code string, excludeProductID uint) (string, error) {
+	hash := sha1.Sum([]byte(strings.TrimSpace(provider) + ":" + strings.TrimSpace(code)))
+	base := normalizeProviderSlug(fmt.Sprintf("catalog-%s-%s", platform, hex.EncodeToString(hash[:])[:16]))
+	excludeID := ""
+	if excludeProductID > 0 {
+		excludeID = strconv.FormatUint(uint64(excludeProductID), 10)
+	}
+	for i := 0; i < 100; i++ {
+		candidate := base
+		if i > 0 {
+			candidate = fmt.Sprintf("%s-%d", base, i+1)
+		}
+		var excluded *string
+		if excludeID != "" {
+			excluded = &excludeID
+		}
+		count, err := s.productRepo.CountBySlug(candidate, excluded)
+		if err != nil {
+			return "", err
+		}
+		if count == 0 {
+			return candidate, nil
+		}
+	}
+	return "", fmt.Errorf("provider catalog slug conflict after retries: %s", base)
 }
 
 func localizedText(value string) models.JSON {

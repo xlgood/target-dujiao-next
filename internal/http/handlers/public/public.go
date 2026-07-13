@@ -2,6 +2,7 @@ package public
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -67,8 +68,8 @@ func (v *publicProductView) toProductResp() dto.ProductResp {
 		skuDisplay := buildPublicStockDisplay(mode, skuStatus, skuQuantity)
 		skus = append(skus, dto.SKUResp{
 			ID:                   sv.ID,
-			SKUCode:              sv.SKUCode,
-			SpecValues:           sv.SpecValuesJSON,
+			SKUCode:              sanitizePublicSKUCode(sv.SKUCode, sv.ID),
+			SpecValues:           sanitizePublicSpecValues(sv.SpecValuesJSON),
 			PriceAmount:          sv.PriceAmount,
 			PriceQuantityBasis:   service.SKUPriceQuantityBasis(v.Product.PriceQuantityBasis, sv.PriceQuantityBasis),
 			ManualStockTotal:     maskPublicStockInt(mode, sv.ManualStockTotal),
@@ -105,7 +106,7 @@ func (v *publicProductView) toProductResp() dto.ProductResp {
 		PriceQuantityBasis:   service.NormalizePriceQuantityBasis(v.Product.PriceQuantityBasis),
 		WholesalePrices:      wholesalePrices,
 		Images:               v.Product.Images,
-		Tags:                 v.Product.Tags,
+		Tags:                 sanitizePublicProductTags(v.Product.Tags),
 		PurchaseType:         v.Product.PurchaseType,
 		MinPurchaseQuantity:  v.Product.MinPurchaseQuantity,
 		MaxPurchaseQuantity:  v.Product.MaxPurchaseQuantity,
@@ -131,6 +132,40 @@ func (v *publicProductView) toProductResp() dto.ProductResp {
 		MemberPrices:         v.MemberPrices,
 	}
 	return resp
+}
+
+func sanitizePublicProductTags(tags models.StringArray) models.StringArray {
+	result := make(models.StringArray, 0, len(tags))
+	for _, tag := range tags {
+		normalized := strings.ToLower(strings.ReplaceAll(strings.TrimSpace(tag), " ", ""))
+		if normalized == "tgx" || normalized == "fansgurus" {
+			continue
+		}
+		result = append(result, tag)
+	}
+	return result
+}
+
+func sanitizePublicSpecValues(values models.JSON) models.JSON {
+	if len(values) == 0 {
+		return models.JSON{}
+	}
+	result := make(models.JSON, len(values))
+	for key, value := range values {
+		if strings.EqualFold(strings.TrimSpace(key), "provider") {
+			continue
+		}
+		result[key] = value
+	}
+	return result
+}
+
+func sanitizePublicSKUCode(code string, id uint) string {
+	normalized := strings.ToLower(strings.ReplaceAll(strings.TrimSpace(code), " ", ""))
+	if strings.Contains(normalized, "tgx") || strings.Contains(normalized, "fansgurus") {
+		return fmt.Sprintf("option-%d", id)
+	}
+	return code
 }
 
 func normalizePublicStockDisplayMode(raw string) string {

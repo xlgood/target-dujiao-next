@@ -198,8 +198,14 @@ func TestImportProviderCatalogRefreshesExistingMapping(t *testing.T) {
 	if product.PriceAmount.String() != "12.00" || product.MinPurchaseQuantity != 1000 || len(product.SKUs) != 1 || product.SKUs[0].PriceAmount.String() != "12.00" {
 		t.Fatalf("existing catalog row was not refreshed: product=%+v skus=%+v", product, product.SKUs)
 	}
-	if len(product.Tags) != 1 || product.Tags[0] != "instagram" {
-		t.Fatalf("public tags leaked provider or platform: %v", product.Tags)
+	if len(product.Tags) != 0 {
+		t.Fatalf("provider catalog products should not publish internal tags: %v", product.Tags)
+	}
+	if product.Slug != "catalog-instagram-28c0bd9bfab7eb10" {
+		t.Fatalf("provider-neutral slug was not applied: %s", product.Slug)
+	}
+	if _, exists := product.SKUs[0].SpecValuesJSON["provider"]; exists {
+		t.Fatalf("provider leaked into public SKU specs: %v", product.SKUs[0].SpecValuesJSON)
 	}
 }
 
@@ -236,8 +242,12 @@ func TestImportProviderCatalogCreatesTGXRaceSKUsAndWidgetSchema(t *testing.T) {
 		t.Fatalf("result=%+v, want imported=1", result)
 	}
 
+	var mapping models.ProductMapping
+	if err := db.Where("upstream_product_code = ?", "IG-001").First(&mapping).Error; err != nil {
+		t.Fatalf("load mapping: %v", err)
+	}
 	var product models.Product
-	if err := db.Preload("SKUs").Where("slug = ?", "tgx-instagram-ig-001").First(&product).Error; err != nil {
+	if err := db.Preload("SKUs").First(&product, mapping.LocalProductID).Error; err != nil {
 		t.Fatalf("load product: %v", err)
 	}
 	if len(product.SKUs) != 2 {
