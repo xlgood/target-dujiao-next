@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/dujiao-next/internal/models"
@@ -113,6 +114,7 @@ func (s *ProductMappingService) SyncProviderCatalogWithClients(
 
 func (s *ProductMappingService) deactivateStaleProviderCatalogMappings(input ProviderCatalogSyncInput, catalog upstream.FilteredCatalog) (int, error) {
 	total := 0
+	var excludedCategory *models.Category
 	fansCodes := providerCatalogCodes(catalog.FansGurus)
 	tgxCodes := providerCatalogCodes(catalog.TGX)
 	for _, target := range []struct {
@@ -126,7 +128,7 @@ func (s *ProductMappingService) deactivateStaleProviderCatalogMappings(input Pro
 		if target.connectionID == 0 {
 			continue
 		}
-		mappings, err := s.mappingRepo.ListActiveByProvider(target.connectionID, target.provider)
+		mappings, err := s.mappingRepo.ListByProvider(target.connectionID, target.provider)
 		if err != nil {
 			return 0, err
 		}
@@ -138,18 +140,73 @@ func (s *ProductMappingService) deactivateStaleProviderCatalogMappings(input Pro
 			if _, ok := active[mappings[i].UpstreamProductCode]; ok {
 				continue
 			}
-			mappings[i].IsActive = false
-			mappings[i].UpstreamStatus = models.UpstreamStatusInactive
-			if err := s.mappingRepo.Update(&mappings[i]); err != nil {
+			if mappings[i].IsActive || mappings[i].UpstreamStatus == models.UpstreamStatusActive {
+				mappings[i].IsActive = false
+				mappings[i].UpstreamStatus = models.UpstreamStatusInactive
+				if err := s.mappingRepo.Update(&mappings[i]); err != nil {
+					return 0, err
+				}
+				total++
+			}
+			if excludedCategory == nil {
+				excludedCategory, err = s.excludedProviderCategory()
+				if err != nil {
+					return 0, err
+				}
+			}
+			if err := s.cleanExcludedProviderProduct(&mappings[i], excludedCategory.ID); err != nil {
 				return 0, err
 			}
-			if err := s.deactivateMappedProduct(&mappings[i]); err != nil {
-				return 0, err
-			}
-			total++
 		}
 	}
 	return total, nil
+}
+
+func (s *ProductMappingService) cleanExcludedProviderProduct(mapping *models.ProductMapping, categoryID uint) error {
+	if mapping == nil || mapping.LocalProductID == 0 {
+		return nil
+	}
+	productID := strconv.FormatUint(uint64(mapping.LocalProductID), 10)
+	return s.productRepo.QuickUpdate(productID, map[string]interface{}{
+		"category_id": categoryID,
+		"slug":        "catalog-excluded-" + productID,
+		"tags":        models.StringArray{},
+		"is_active":   false,
+	})
+}
+
+func (s *ProductMappingService) excludedProviderCategory() (*models.Category, error) {
+	const slug = "provider-catalog-excluded"
+	category, err := s.categoryRepo.GetBySlug(slug)
+	if err != nil {
+		return nil, err
+	}
+	if category != nil {
+		if category.IsActive {
+			category.IsActive = false
+			if err := s.categoryRepo.Update(category); err != nil {
+				return nil, err
+			}
+		}
+		return category, nil
+	}
+	category = &models.Category{
+		Slug: slug,
+		NameJSON: models.JSON{
+			"zh-CN": "已排除目录",
+			"zh-TW": "已排除目錄",
+			"en-US": "Excluded catalog",
+		},
+		IsActive: false,
+	}
+	if err := s.categoryRepo.Create(category); err != nil {
+		return nil, err
+	}
+	if err := s.categoryRepo.UpdateActive(strconv.FormatUint(uint64(category.ID), 10), false); err != nil {
+		return nil, err
+	}
+	category.IsActive = false
+	return category, nil
 }
 
 func providerCatalogCodes(items []upstream.ProviderCatalogItem) []string {

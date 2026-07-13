@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/dujiao-next/internal/models"
@@ -154,9 +155,31 @@ func TestSyncProviderCatalogWithClientsDeactivatesStaleMappings(t *testing.T) {
 		nil,
 	)
 
+	legacyCategory := models.Category{Slug: "platform-x", NameJSON: models.JSON{"zh-CN": "x"}, IsActive: true}
+	if err := db.Create(&legacyCategory).Error; err != nil {
+		t.Fatalf("seed category: %v", err)
+	}
+	legacyProduct := models.Product{
+		CategoryID:      legacyCategory.ID,
+		Slug:            "tgx-x-stale",
+		TitleJSON:       models.JSON{"zh-CN": "Gmail account"},
+		DescriptionJSON: models.JSON{},
+		ContentJSON:     models.JSON{},
+		SeoMetaJSON:     models.JSON{},
+		Tags:            models.StringArray{"x", "tgx"},
+		IsMapped:        true,
+		IsActive:        true,
+	}
+	if err := db.Create(&legacyProduct).Error; err != nil {
+		t.Fatalf("seed product: %v", err)
+	}
+	legacySKU := models.ProductSKU{ProductID: legacyProduct.ID, SKUCode: "tgx-x-stale", SpecValuesJSON: models.JSON{"provider": "tgx", "platform": "x"}, IsActive: true}
+	if err := db.Create(&legacySKU).Error; err != nil {
+		t.Fatalf("seed sku: %v", err)
+	}
 	activeMapping := models.ProductMapping{
 		ConnectionID:        101,
-		LocalProductID:      999,
+		LocalProductID:      legacyProduct.ID,
 		UpstreamProductCode: "stale",
 		Provider:            upstream.CatalogProviderFansGurus,
 		Platform:            "instagram",
@@ -165,6 +188,32 @@ func TestSyncProviderCatalogWithClientsDeactivatesStaleMappings(t *testing.T) {
 	}
 	if err := mappingRepo.Create(&activeMapping); err != nil {
 		t.Fatalf("seed mapping: %v", err)
+	}
+	legacyProduct2 := legacyProduct
+	legacyProduct2.ID = 0
+	legacyProduct2.Slug = "tgx-youtube-already-inactive"
+	legacyProduct2.Tags = models.StringArray{"youtube", "tgx"}
+	legacyProduct2.IsActive = false
+	if err := db.Create(&legacyProduct2).Error; err != nil {
+		t.Fatalf("seed inactive product: %v", err)
+	}
+	inactiveMapping := models.ProductMapping{
+		ConnectionID:        101,
+		LocalProductID:      legacyProduct2.ID,
+		UpstreamProductCode: "already-inactive",
+		Provider:            upstream.CatalogProviderFansGurus,
+		Platform:            "youtube",
+		UpstreamStatus:      models.UpstreamStatusInactive,
+		IsActive:            false,
+	}
+	if err := mappingRepo.Create(&inactiveMapping); err != nil {
+		t.Fatalf("seed inactive mapping: %v", err)
+	}
+	if err := db.Model(&models.ProductMapping{}).Where("id = ?", inactiveMapping.ID).Updates(map[string]interface{}{
+		"is_active":       false,
+		"upstream_status": models.UpstreamStatusInactive,
+	}).Error; err != nil {
+		t.Fatalf("force inactive mapping state: %v", err)
 	}
 
 	result, err := svc.SyncProviderCatalogWithClients(
@@ -190,5 +239,22 @@ func TestSyncProviderCatalogWithClientsDeactivatesStaleMappings(t *testing.T) {
 	}
 	if got.IsActive || got.UpstreamStatus != models.UpstreamStatusInactive {
 		t.Fatalf("stale mapping was not deactivated: %+v", got)
+	}
+	var cleaned models.Product
+	if err := db.Preload("Category").Preload("SKUs").First(&cleaned, legacyProduct.ID).Error; err != nil {
+		t.Fatalf("load cleaned product: %v", err)
+	}
+	if cleaned.IsActive || cleaned.Category.Slug != "provider-catalog-excluded" || cleaned.Category.IsActive {
+		t.Fatalf("excluded product was not isolated: %+v category=%+v", cleaned, cleaned.Category)
+	}
+	if len(cleaned.Tags) != 0 || cleaned.Slug != fmt.Sprintf("catalog-excluded-%d", legacyProduct.ID) {
+		t.Fatalf("excluded product metadata was not cleaned: slug=%q tags=%v", cleaned.Slug, cleaned.Tags)
+	}
+	var alreadyInactive models.Product
+	if err := db.Preload("Category").First(&alreadyInactive, legacyProduct2.ID).Error; err != nil {
+		t.Fatalf("load already inactive product: %v", err)
+	}
+	if len(alreadyInactive.Tags) != 0 || alreadyInactive.Category.Slug != "provider-catalog-excluded" || alreadyInactive.Slug != fmt.Sprintf("catalog-excluded-%d", legacyProduct2.ID) {
+		t.Fatalf("already inactive product was not cleaned: %+v category=%+v", alreadyInactive, alreadyInactive.Category)
 	}
 }

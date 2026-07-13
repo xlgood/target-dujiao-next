@@ -24,6 +24,7 @@ type ProductMappingRepository interface {
 	ListAllActive() ([]models.ProductMapping, error)
 	ListByLocalProductIDs(productIDs []uint) ([]models.ProductMapping, error)
 	ListUpstreamIDsByConnection(connectionID uint) ([]uint, error)
+	ListByProvider(connectionID uint, provider string) ([]models.ProductMapping, error)
 	ListActiveByProvider(connectionID uint, provider string) ([]models.ProductMapping, error)
 	DeactivateMissingProviderCodes(connectionID uint, provider string, activeCodes []string) (int64, error)
 }
@@ -199,6 +200,14 @@ func (r *GormProductMappingRepository) ListUpstreamIDsByConnection(connectionID 
 func (r *GormProductMappingRepository) ListActiveByProvider(connectionID uint, provider string) ([]models.ProductMapping, error) {
 	var mappings []models.ProductMapping
 	if err := r.db.Where("connection_id = ? AND provider = ? AND is_active = ?", connectionID, provider, true).Find(&mappings).Error; err != nil {
+		return nil, err
+	}
+	return mappings, nil
+}
+
+func (r *GormProductMappingRepository) ListByProvider(connectionID uint, provider string) ([]models.ProductMapping, error) {
+	var mappings []models.ProductMapping
+	if err := r.db.Where("connection_id = ? AND provider = ?", connectionID, provider).Find(&mappings).Error; err != nil {
 		return nil, err
 	}
 	return mappings, nil
