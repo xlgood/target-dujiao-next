@@ -40,11 +40,6 @@ func TestRefreshTGXInventoryStoresActualStock(t *testing.T) {
 				t.Fatalf("shared_code=%q, want TGX-001", got)
 			}
 			_ = json.NewEncoder(w).Encode(map[string]interface{}{"code": 200, "data": map[string]interface{}{"stock": 27}})
-		case "/commodity/inventoryState":
-			if got := r.FormValue("quantity"); got != "1" {
-				t.Fatalf("quantity=%q, want 1", got)
-			}
-			_ = json.NewEncoder(w).Encode(map[string]interface{}{"code": 200, "data": map[string]interface{}{"available": true}})
 		default:
 			http.NotFound(w, r)
 		}

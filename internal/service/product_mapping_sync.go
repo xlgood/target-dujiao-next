@@ -529,20 +529,14 @@ func (s *ProductMappingService) RefreshTGXInventory(mappingID uint) error {
 		if err != nil {
 			return fmt.Errorf("get TGX inventory for %s: %w", sharedCode, err)
 		}
-		state, err := client.GetInventoryState(ctx, sharedCode, race, 1)
-		if err != nil {
-			return fmt.Errorf("get TGX inventory state for %s: %w", sharedCode, err)
-		}
 		skuMappings[i].StockSyncedAt = &now
-		skuMappings[i].UpstreamIsActive = state != nil && state.Available
-		switch {
-		case state == nil || !state.Available:
-			skuMappings[i].UpstreamStock = 0
-		case inventory != nil && inventory.Stock > 0:
+		if inventory != nil && inventory.Stock > 0 {
 			skuMappings[i].UpstreamStock = inventory.Stock
-		default:
-			// TGX returns zero for inventory-hidden goods. inventoryState is
-			// authoritative for whether one unit can be purchased in that case.
+			skuMappings[i].UpstreamIsActive = true
+		} else {
+			// A zero inventory response can mean either sold out or an upstream
+			// inventory-hidden product. Keep the existing availability state; the
+			// purchase flow performs inventoryState just before a paid order.
 			skuMappings[i].UpstreamStock = -1
 		}
 		if err := s.skuMappingRepo.Update(&skuMappings[i]); err != nil {
