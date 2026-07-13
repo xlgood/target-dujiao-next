@@ -245,6 +245,11 @@ func ContainsTelegramCatalogText(parts ...string) bool {
 }
 
 func (i ProviderCatalogItem) Platform() string {
+	// Email accounts are outside the initial social-platform catalog. Treating a
+	// Gmail account as a YouTube product because it mentions YT is unsafe.
+	if catalogTextContainsAlias(normalizeCatalogText(i.Name), "gmail") {
+		return ""
+	}
 	if unsupportedPlatformPrecedesSupportedPlatform(i.Name) {
 		return ""
 	}

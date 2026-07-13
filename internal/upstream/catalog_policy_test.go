@@ -53,6 +53,11 @@ func TestProviderCatalogPlatformPrefersTitleAndRejectsUnsupportedTitles(t *testi
 			want: "",
 		},
 		{
+			name: "gmail title is always excluded from social catalog",
+			item: ProviderCatalogItem{Name: "Facebook recovery Gmail account", Category: "Facebook"},
+			want: "",
+		},
+		{
 			name: "facebook account may mention hotmail verification",
 			item: ProviderCatalogItem{Name: "FB aged account with Hotmail verification", Category: "Facebook"},
 			want: "facebook",
