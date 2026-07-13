@@ -26,6 +26,9 @@ func (s *ProductMappingService) SyncProduct(mappingID uint) error {
 	if mapping == nil {
 		return ErrMappingNotFound
 	}
+	if mapping.Provider == upstream.CatalogProviderFansGurus || mapping.Provider == upstream.CatalogProviderTGX {
+		return ErrProviderCatalogSyncRequired
+	}
 
 	conn, err := s.connService.GetByID(mapping.ConnectionID)
 	if err != nil {

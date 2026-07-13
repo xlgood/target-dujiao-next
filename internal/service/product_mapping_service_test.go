@@ -308,6 +308,23 @@ func TestSyncProductMarksDeletedWhenUpstreamSoftDeleted(t *testing.T) {
 	}
 }
 
+func TestSyncProductRequiresCatalogSyncForProviderMapping(t *testing.T) {
+	svc, db, mapping, cleanup := setupMappingWithUpstreamHandler(t,
+		"file:sync_provider_catalog?mode=memory&cache=shared",
+		func(w http.ResponseWriter, r *http.Request) {
+			t.Fatal("provider catalog mapping must not call the generic product endpoint")
+		},
+	)
+	defer cleanup()
+
+	if err := db.Model(&models.ProductMapping{}).Where("id = ?", mapping.ID).Update("provider", upstream.CatalogProviderFansGurus).Error; err != nil {
+		t.Fatalf("mark mapping as provider catalog mapping: %v", err)
+	}
+	if err := svc.SyncProduct(mapping.ID); !errors.Is(err, ErrProviderCatalogSyncRequired) {
+		t.Fatalf("SyncProduct error=%v, want ErrProviderCatalogSyncRequired", err)
+	}
+}
+
 func TestSyncProductMarksInactiveWhenUpstreamReturnsInactive(t *testing.T) {
 	svc, db, mapping, cleanup := setupMappingWithUpstreamHandler(t,
 		"file:sync_inactive?mode=memory&cache=shared",

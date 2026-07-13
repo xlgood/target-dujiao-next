@@ -274,6 +274,10 @@ func (h *Handler) SyncProductMapping(c *gin.Context) {
 			shared.RespondError(c, response.CodeNotFound, "error.mapping_not_found", nil)
 			return
 		}
+		if errors.Is(err, service.ErrProviderCatalogSyncRequired) {
+			shared.RespondError(c, response.CodeBadRequest, "error.provider_catalog_sync_required", nil)
+			return
+		}
 		shared.RespondError(c, response.CodeInternal, "error.mapping_sync_failed", err)
 		return
 	}

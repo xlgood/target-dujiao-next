@@ -21,6 +21,9 @@ var (
 	ErrMappingAlreadyExists    = errors.New("product mapping already exists for this upstream product")
 	ErrUpstreamProductNotFound = errors.New("upstream product not found")
 	ErrMappingInactive         = errors.New("product mapping is inactive")
+	// Provider catalog records are refreshed as one filtered catalog so the
+	// cross-provider platform policy remains consistent.
+	ErrProviderCatalogSyncRequired = errors.New("provider catalog mappings must be refreshed through catalog sync")
 )
 
 // ProductMappingService 商品映射业务服务
