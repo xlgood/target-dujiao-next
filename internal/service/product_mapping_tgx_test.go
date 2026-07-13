@@ -36,10 +36,10 @@ func TestRefreshTGXInventoryStoresActualStock(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
 		case "/commodity/inventory":
-			if got := r.FormValue("shared_code"); got != "TGX-001" {
-				t.Fatalf("shared_code=%q, want TGX-001", got)
+			if got := r.FormValue("sharedCode"); got != "TGX-001" {
+				t.Fatalf("sharedCode=%q, want TGX-001", got)
 			}
-			_ = json.NewEncoder(w).Encode(map[string]interface{}{"code": 200, "data": map[string]interface{}{"stock": 27}})
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{"code": 200, "data": map[string]interface{}{"count": 27}})
 		default:
 			http.NotFound(w, r)
 		}
@@ -85,6 +85,56 @@ func TestRefreshTGXInventoryStoresActualStock(t *testing.T) {
 		t.Fatalf("reload SKU mapping: %v", err)
 	}
 	if got.UpstreamStock != 27 || !got.UpstreamIsActive || got.StockSyncedAt == nil {
+		t.Fatalf("unexpected refreshed SKU mapping: %+v", got)
+	}
+}
+
+func TestRefreshTGXInventoryStoresZeroStockAsSoldOut(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"code": 200, "data": map[string]interface{}{"count": 0}})
+	}))
+	defer server.Close()
+
+	db := setupProviderCatalogImportDB(t)
+	if err := db.AutoMigrate(&models.SiteConnection{}); err != nil {
+		t.Fatalf("migrate site connections: %v", err)
+	}
+	connService := NewSiteConnectionService(repository.NewSiteConnectionRepository(db), "test-encryption-key", t.TempDir())
+	conn, err := connService.Create(CreateConnectionInput{
+		Name: "TGX", BaseURL: server.URL, ApiKey: "app-id", ApiSecret: "app-key", Protocol: constants.ConnectionProtocolTGXAccount,
+	})
+	if err != nil {
+		t.Fatalf("create TGX connection: %v", err)
+	}
+	product := &models.Product{CategoryID: 1, Slug: "tgx-zero-stock", TitleJSON: models.JSON{"zh-CN": "TGX zero stock"}, IsMapped: true}
+	if err := db.Create(product).Error; err != nil {
+		t.Fatalf("create product: %v", err)
+	}
+	sku := &models.ProductSKU{ProductID: product.ID, SKUCode: "TGX-002", IsActive: true}
+	if err := db.Create(sku).Error; err != nil {
+		t.Fatalf("create SKU: %v", err)
+	}
+	mapping := &models.ProductMapping{ConnectionID: conn.ID, LocalProductID: product.ID, Provider: upstream.CatalogProviderTGX, IsActive: true, UpstreamStatus: models.UpstreamStatusActive}
+	if err := db.Create(mapping).Error; err != nil {
+		t.Fatalf("create mapping: %v", err)
+	}
+	skuMapping := &models.SKUMapping{ProductMappingID: mapping.ID, LocalSKUID: sku.ID, UpstreamSKUCode: "TGX-002", UpstreamStock: -1, UpstreamIsActive: true}
+	if err := db.Create(skuMapping).Error; err != nil {
+		t.Fatalf("create SKU mapping: %v", err)
+	}
+
+	svc := NewProductMappingService(
+		repository.NewProductMappingRepository(db), repository.NewSKUMappingRepository(db), repository.NewProductRepository(db), repository.NewProductSKURepository(db), repository.NewCategoryRepository(db), connService,
+	)
+	if err := svc.RefreshTGXInventory(mapping.ID); err != nil {
+		t.Fatalf("RefreshTGXInventory: %v", err)
+	}
+	var got models.SKUMapping
+	if err := db.First(&got, skuMapping.ID).Error; err != nil {
+		t.Fatalf("reload SKU mapping: %v", err)
+	}
+	if got.UpstreamStock != 0 || got.UpstreamIsActive || got.StockSyncedAt == nil {
 		t.Fatalf("unexpected refreshed SKU mapping: %+v", got)
 	}
 }

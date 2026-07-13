@@ -4,8 +4,6 @@ import (
 	"crypto/md5"
 	"encoding/hex"
 	"net/url"
-	"sort"
-	"strings"
 )
 
 func SignTGX(params url.Values, appKey string) string {
@@ -15,24 +13,20 @@ func SignTGX(params url.Values, appKey string) string {
 }
 
 func BuildTGXSignString(params url.Values, appKey string) string {
-	keys := make([]string, 0, len(params))
+	filtered := make(url.Values, len(params))
 	for key, values := range params {
 		if key == "sign" || len(values) == 0 || values[0] == "" {
 			continue
 		}
-		keys = append(keys, key)
+		filtered.Set(key, values[0])
 	}
-	sort.Strings(keys)
 
-	parts := make([]string, 0, len(keys)+1)
-	for _, key := range keys {
-		parts = append(parts, key+"="+params.Get(key))
-	}
-	parts = append(parts, "key="+appKey)
-
-	decoded, err := url.QueryUnescape(strings.Join(parts, "&"))
+	// TGX signs urldecode(http_build_query(sortedParams) + "&key=app_key").
+	// url.Values.Encode provides the same sorted query encoding before decoding.
+	encoded := filtered.Encode() + "&key=" + url.QueryEscape(appKey)
+	decoded, err := url.QueryUnescape(encoded)
 	if err != nil {
-		return strings.Join(parts, "&")
+		return encoded
 	}
 	return decoded
 }

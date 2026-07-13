@@ -76,6 +76,8 @@ type ProviderCatalogItem struct {
 	MaxQuantity        int
 	Variants           []ProviderCatalogVariant
 	ManualSchema       map[string]interface{}
+	Images             []string
+	SortOrder          int
 	Active             bool
 }
 
@@ -131,6 +133,11 @@ func NewTGXCatalogItem(commodity TGXCommodity) (ProviderCatalogItem, error) {
 		return ProviderCatalogItem{}, err
 	}
 	manualSchema := ParseTGXWidgetManualSchema(commodity.Widget)
+	addTGXContactField(manualSchema, commodity.ContactType)
+	images := make([]string, 0, 1)
+	if cover := strings.TrimSpace(commodity.Cover); cover != "" {
+		images = append(images, cover)
+	}
 	return ProviderCatalogItem{
 		Provider:      CatalogProviderTGX,
 		Code:          commodity.Code,
@@ -146,6 +153,8 @@ func NewTGXCatalogItem(commodity TGXCommodity) (ProviderCatalogItem, error) {
 		MinQuantity:        commodity.Minimum,
 		Variants:           variants,
 		ManualSchema:       manualSchema,
+		Images:             images,
+		SortOrder:          commodity.Sort,
 		Active:             true,
 	}, nil
 }
@@ -492,22 +501,99 @@ func normalizeTGXWidgetFieldList(list []map[string]interface{}) []map[string]int
 		if key == "" {
 			continue
 		}
-		fieldType := strings.ToLower(firstStringValue(item, "type", "input_type"))
-		if fieldType == "" {
-			fieldType = "text"
-		}
+		fieldType := normalizeTGXWidgetFieldType(firstStringValue(item, "type", "input_type"), item)
 		label := firstStringValue(item, "label", "title", "cn", "name")
 		if label == "" {
 			label = key
 		}
-		fields = append(fields, map[string]interface{}{
+		field := map[string]interface{}{
 			"key":      key,
 			"type":     fieldType,
 			"label":    label,
 			"required": boolValue(item["required"]),
-		})
+		}
+		if fieldType == "select" {
+			field["options"] = tgxWidgetOptions(item)
+		}
+		fields = append(fields, field)
 	}
 	return fields
+}
+
+func normalizeTGXWidgetFieldType(raw string, item map[string]interface{}) string {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "select":
+		if len(tgxWidgetOptions(item)) > 0 {
+			return "select"
+		}
+		// TGX's documented select example does not include options. A text input
+		// preserves a checkout path instead of creating an invalid local schema.
+		return "text"
+	case "input", "", "text", "textarea", "phone", "email", "number", "radio", "checkbox":
+		if strings.TrimSpace(raw) == "" || strings.EqualFold(strings.TrimSpace(raw), "input") {
+			return "text"
+		}
+		return strings.ToLower(strings.TrimSpace(raw))
+	default:
+		return "text"
+	}
+}
+
+func tgxWidgetOptions(item map[string]interface{}) []string {
+	for _, key := range []string{"options", "option", "values"} {
+		raw, ok := item[key]
+		if !ok {
+			continue
+		}
+		var values []string
+		switch typed := raw.(type) {
+		case []interface{}:
+			for _, value := range typed {
+				if text := strings.TrimSpace(fmt.Sprint(value)); text != "" && text != "<nil>" {
+					values = append(values, text)
+				}
+			}
+		case []string:
+			for _, value := range typed {
+				if text := strings.TrimSpace(value); text != "" {
+					values = append(values, text)
+				}
+			}
+		case string:
+			for _, value := range strings.Split(typed, ",") {
+				if text := strings.TrimSpace(value); text != "" {
+					values = append(values, text)
+				}
+			}
+		}
+		return values
+	}
+	return nil
+}
+
+func addTGXContactField(schema map[string]interface{}, contactType string) {
+	var fieldType string
+	switch strings.TrimSpace(contactType) {
+	case "1":
+		fieldType = "email"
+	case "2":
+		fieldType = "phone"
+	default:
+		return
+	}
+
+	fields, _ := schema["fields"].([]map[string]interface{})
+	for _, field := range fields {
+		if strings.TrimSpace(fmt.Sprint(field["key"])) == "contact" {
+			return
+		}
+	}
+	schema["fields"] = append(fields, map[string]interface{}{
+		"key":      "contact",
+		"type":     fieldType,
+		"label":    "Contact",
+		"required": true,
+	})
 }
 
 func firstStringValue(values map[string]interface{}, keys ...string) string {

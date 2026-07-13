@@ -1094,11 +1094,17 @@ func TestSubmitToUpstream_TGXProviderImmediateSecret(t *testing.T) {
 			t.Fatalf("ParseForm: %v", err)
 		}
 		if r.URL.Path == "/commodity/inventory" {
-			_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "data": map[string]any{"stock": 5}})
+			if got := r.FormValue("sharedCode"); got != "IG-001" {
+				t.Fatalf("sharedCode=%s, want IG-001", got)
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"code": 200, "data": map[string]any{"count": 5}})
 			return
 		}
 		if r.URL.Path == "/commodity/inventoryState" {
-			_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "data": map[string]any{"available": true, "quantity": 1}})
+			if got := r.FormValue("num"); got != "1" {
+				t.Fatalf("num=%s, want 1", got)
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"code": 200, "data": map[string]any{}})
 			return
 		}
 		if r.URL.Path != "/commodity/trade" {
@@ -1119,13 +1125,13 @@ func TestSubmitToUpstream_TGXProviderImmediateSecret(t *testing.T) {
 		if got := r.FormValue("email"); got != "buyer@example.com" {
 			t.Fatalf("email=%s, want buyer@example.com", got)
 		}
-		if r.FormValue("app_key") != "" {
-			t.Fatal("app_key must not be sent")
+		if got := r.FormValue("app_key"); got != "tgx-app-key" {
+			t.Fatalf("app_key=%s, want configured key", got)
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
-			"code": 0,
-			"data": map[string]string{"trade_no": "TGX-9988", "secret": "account:pass", "status": "completed"},
+			"code": 200,
+			"data": map[string]any{"trade_no": "TGX-9988", "secret": "account:pass", "status": 1},
 		})
 	}))
 	defer server.Close()
@@ -1163,7 +1169,7 @@ func TestSubmitToUpstream_TGXProviderImmediateSecret(t *testing.T) {
 	}
 }
 
-func TestSubmitToUpstream_TGXProviderRecoversByRequestNo(t *testing.T) {
+func TestSubmitToUpstream_TGXProviderFailsSafelyWithoutTradeNo(t *testing.T) {
 	db := setupProcurementTestDB(t)
 
 	order := createProcTestOrder(t, db, "PROC-TGX-RECOVER-001", constants.OrderStatusPaid, constants.FulfillmentTypeUpstream)
@@ -1187,23 +1193,15 @@ func TestSubmitToUpstream_TGXProviderRecoversByRequestNo(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
 		case "/commodity/inventory":
-			_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "data": map[string]any{"stock": 5}})
+			_ = json.NewEncoder(w).Encode(map[string]any{"code": 200, "data": map[string]any{"count": 5}})
 		case "/commodity/inventoryState":
-			_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "data": map[string]any{"available": true, "quantity": 1}})
+			_ = json.NewEncoder(w).Encode(map[string]any{"code": 200, "data": map[string]any{}})
 		case "/commodity/trade":
 			tradeCalls++
 			if got := r.FormValue("request_no"); got != order.OrderNo {
 				t.Fatalf("request_no=%s, want %s", got, order.OrderNo)
 			}
-			_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "data": map[string]string{}})
-		case "/commodity/query":
-			if got := r.FormValue("request_no"); got != order.OrderNo {
-				t.Fatalf("request_no=%s, want %s", got, order.OrderNo)
-			}
-			_ = json.NewEncoder(w).Encode(map[string]any{
-				"code": 0,
-				"data": map[string]string{"trade_no": "TGX-RECOVERED-1", "secret": "account:pass", "status": "completed"},
-			})
+			_ = json.NewEncoder(w).Encode(map[string]any{"code": 200, "data": map[string]string{}})
 		default:
 			t.Fatalf("path=%s", r.URL.Path)
 		}
@@ -1234,15 +1232,18 @@ func TestSubmitToUpstream_TGXProviderRecoversByRequestNo(t *testing.T) {
 
 	var updatedProc models.ProcurementOrder
 	db.First(&updatedProc, proc.ID)
-	if updatedProc.Status != constants.ProcurementStatusFulfilled || updatedProc.UpstreamOrderNo != "TGX-RECOVERED-1" {
+	if updatedProc.Status != constants.ProcurementStatusFailed || updatedProc.UpstreamOrderNo != "" {
 		t.Fatalf("unexpected procurement: %+v", updatedProc)
 	}
-	var fulfillment models.Fulfillment
-	if err := db.Where("order_id = ?", order.ID).First(&fulfillment).Error; err != nil {
-		t.Fatalf("load fulfillment: %v", err)
+	if updatedProc.ErrorMessage != providerSubmitTemporarilyUnavailable {
+		t.Fatalf("error_message=%q", updatedProc.ErrorMessage)
 	}
-	if fulfillment.Payload != "account:pass" {
-		t.Fatalf("payload=%q, want account:pass", fulfillment.Payload)
+	var fulfillmentCount int64
+	if err := db.Model(&models.Fulfillment{}).Where("order_id = ?", order.ID).Count(&fulfillmentCount).Error; err != nil {
+		t.Fatalf("count fulfillment: %v", err)
+	}
+	if fulfillmentCount != 0 {
+		t.Fatalf("fulfillment count=%d, want 0", fulfillmentCount)
 	}
 }
 
@@ -1400,15 +1401,15 @@ func TestProviderFulfillmentEndToEnd_TGXMockDelayedSecret(t *testing.T) {
 		if got := r.FormValue("app_id"); got != "tgx-app-id" {
 			t.Fatalf("app_id=%s, want tgx-app-id", got)
 		}
-		if r.FormValue("app_key") != "" {
-			t.Fatal("app_key must not be sent")
+		if got := r.FormValue("app_key"); got != "tgx-app-key" {
+			t.Fatalf("app_key=%s, want configured key", got)
 		}
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
 		case "/commodity/inventory":
-			_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "data": map[string]any{"stock": 5}})
+			_ = json.NewEncoder(w).Encode(map[string]any{"code": 200, "data": map[string]any{"count": 5}})
 		case "/commodity/inventoryState":
-			_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "data": map[string]any{"available": true, "quantity": 1}})
+			_ = json.NewEncoder(w).Encode(map[string]any{"code": 200, "data": map[string]any{}})
 		case "/commodity/trade":
 			tradeCalls++
 			if got := r.FormValue("shared_code"); got != "IG-001" {
@@ -1424,17 +1425,17 @@ func TestProviderFulfillmentEndToEnd_TGXMockDelayedSecret(t *testing.T) {
 				t.Fatalf("email=%s, want buyer@example.com", got)
 			}
 			_ = json.NewEncoder(w).Encode(map[string]any{
-				"code": 0,
-				"data": map[string]string{"trade_no": "TGX-E2E-9988", "status": "pending"},
+				"code": 200,
+				"data": map[string]any{"trade_no": "TGX-E2E-9988", "status": 1},
 			})
 		case "/commodity/query":
 			queryCalls++
-			if got := r.FormValue("trade_no"); got != "TGX-E2E-9988" {
-				t.Fatalf("trade_no=%s, want TGX-E2E-9988", got)
+			if got := r.FormValue("tradeNo"); got != "TGX-E2E-9988" {
+				t.Fatalf("tradeNo=%s, want TGX-E2E-9988", got)
 			}
 			_ = json.NewEncoder(w).Encode(map[string]any{
-				"code": 0,
-				"data": map[string]string{"trade_no": "TGX-E2E-9988", "secret": "account:pass", "status": "completed"},
+				"code": 200,
+				"data": map[string]any{"secret": "account:pass", "status": 1, "delivery_status": 1},
 			})
 		default:
 			t.Fatalf("path=%s", r.URL.Path)
@@ -1850,19 +1851,19 @@ func TestPollUpstreamStatus_TGXQueryDeliveredSecret(t *testing.T) {
 		if err := r.ParseForm(); err != nil {
 			t.Fatalf("ParseForm: %v", err)
 		}
-		if got := r.FormValue("trade_no"); got != "TGX-9988" {
-			t.Fatalf("trade_no=%s, want TGX-9988", got)
+		if got := r.FormValue("tradeNo"); got != "TGX-9988" {
+			t.Fatalf("tradeNo=%s, want TGX-9988", got)
 		}
 		if got := r.FormValue("app_id"); got != "tgx-app-id" {
 			t.Fatalf("app_id=%s, want tgx-app-id", got)
 		}
-		if r.FormValue("app_key") != "" {
-			t.Fatal("app_key must not be sent")
+		if got := r.FormValue("app_key"); got != "tgx-app-key" {
+			t.Fatalf("app_key=%s, want configured key", got)
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
-			"code": 0,
-			"data": map[string]string{"trade_no": "TGX-9988", "secret": "account:pass", "status": "completed"},
+			"code": 200,
+			"data": map[string]any{"secret": "account:pass", "status": 1, "delivery_status": 1},
 		})
 	}))
 	defer server.Close()
@@ -1904,8 +1905,8 @@ func TestPollUpstreamStatus_TGXQueryPendingKeepsAccepted(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
-			"code": 0,
-			"data": map[string]string{"trade_no": "TGX-PENDING", "status": "pending"},
+			"code": 200,
+			"data": map[string]any{"status": 1, "delivery_status": 0},
 		})
 	}))
 	defer server.Close()

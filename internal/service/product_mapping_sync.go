@@ -462,6 +462,9 @@ func (s *ProductMappingService) ensureTGXInventoryForOrder(conn *models.SiteConn
 	}
 	state, err := client.GetInventoryState(ctx, sharedCode, race, quantity)
 	if err != nil {
+		if errors.Is(err, upstream.ErrTGXStock) {
+			return ErrUpstreamStockInsufficient
+		}
 		return err
 	}
 	now := time.Now()
@@ -469,15 +472,15 @@ func (s *ProductMappingService) ensureTGXInventoryForOrder(conn *models.SiteConn
 	skuMapping.UpstreamIsActive = state != nil && state.Available
 	if state == nil || !state.Available {
 		skuMapping.UpstreamStock = 0
-	} else if inventory != nil && inventory.Stock > 0 {
-		skuMapping.UpstreamStock = inventory.Stock
+	} else if inventory != nil {
+		skuMapping.UpstreamStock = inventory.Count
 	} else {
 		skuMapping.UpstreamStock = -1
 	}
 	if err := s.skuMappingRepo.Update(skuMapping); err != nil {
 		return err
 	}
-	if state == nil || !state.Available || (inventory != nil && inventory.Stock > 0 && inventory.Stock < quantity) {
+	if state == nil || !state.Available || (inventory != nil && inventory.Count >= 0 && inventory.Count < quantity) {
 		return ErrUpstreamStockInsufficient
 	}
 	return nil
@@ -530,13 +533,11 @@ func (s *ProductMappingService) RefreshTGXInventory(mappingID uint) error {
 			return fmt.Errorf("get TGX inventory for %s: %w", sharedCode, err)
 		}
 		skuMappings[i].StockSyncedAt = &now
-		if inventory != nil && inventory.Stock > 0 {
-			skuMappings[i].UpstreamStock = inventory.Stock
-			skuMappings[i].UpstreamIsActive = true
+		if inventory != nil {
+			skuMappings[i].UpstreamStock = inventory.Count
+			skuMappings[i].UpstreamIsActive = inventory.Count > 0
 		} else {
-			// A zero inventory response can mean either sold out or an upstream
-			// inventory-hidden product. Keep the existing availability state; the
-			// purchase flow performs inventoryState just before a paid order.
+			// Preserve an unknown stock marker only for malformed empty payloads.
 			skuMappings[i].UpstreamStock = -1
 		}
 		if err := s.skuMappingRepo.Update(&skuMappings[i]); err != nil {

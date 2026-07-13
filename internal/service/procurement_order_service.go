@@ -458,18 +458,12 @@ func (s *ProcurementOrderService) submitTGXProcurement(ctx context.Context, proc
 	}
 	resp, err := client.Trade(ctx, req)
 	if err != nil {
-		if recovered, recoverErr := queryTGXTradeByRequestNo(client, localOrder.OrderNo); recoverErr == nil && recovered != nil && strings.TrimSpace(recovered.TradeNo) != "" {
-			return s.acceptTGXProcurement(procOrder, localOrder, recovered.TradeNo, recovered.Secret, recovered.Status)
-		}
 		if isDefinitiveTGXSubmitError(err) {
 			return s.handleSubmitFailure(procOrder, conn, fmt.Sprintf("tgx request error: %v", err), false)
 		}
 		return s.failProviderSubmitForUser(procOrder, localOrder, fmt.Sprintf("tgx submit result unavailable: %v", err))
 	}
 	if resp == nil || strings.TrimSpace(resp.TradeNo) == "" {
-		if recovered, recoverErr := queryTGXTradeByRequestNo(client, localOrder.OrderNo); recoverErr == nil && recovered != nil && strings.TrimSpace(recovered.TradeNo) != "" {
-			return s.acceptTGXProcurement(procOrder, localOrder, recovered.TradeNo, recovered.Secret, recovered.Status)
-		}
 		return s.failProviderSubmitForUser(procOrder, localOrder, "tgx submit result unavailable: empty trade number returned")
 	}
 
@@ -486,6 +480,9 @@ func (s *ProcurementOrderService) verifyTGXInventory(ctx context.Context, client
 	}
 	state, err := client.GetInventoryState(ctx, sharedCode, race, quantity)
 	if err != nil {
+		if errors.Is(err, upstream.ErrTGXStock) {
+			return ErrUpstreamStockInsufficient
+		}
 		return err
 	}
 	now := time.Now()
@@ -493,10 +490,8 @@ func (s *ProcurementOrderService) verifyTGXInventory(ctx context.Context, client
 	skuMapping.UpstreamIsActive = state != nil && state.Available
 	if state == nil || !state.Available {
 		skuMapping.UpstreamStock = 0
-	} else if inventory != nil && inventory.Stock > 0 {
-		// A zero value is ambiguous for inventory-hidden TGX products. The
-		// inventoryState result remains authoritative in that case.
-		skuMapping.UpstreamStock = inventory.Stock
+	} else if inventory != nil {
+		skuMapping.UpstreamStock = inventory.Count
 	} else {
 		skuMapping.UpstreamStock = -1
 	}
@@ -508,7 +503,7 @@ func (s *ProcurementOrderService) verifyTGXInventory(ctx context.Context, client
 	if state == nil || !state.Available {
 		return ErrUpstreamStockInsufficient
 	}
-	if inventory != nil && inventory.Stock > 0 && inventory.Stock < quantity {
+	if inventory != nil && inventory.Count >= 0 && inventory.Count < quantity {
 		return ErrUpstreamStockInsufficient
 	}
 	return nil
@@ -541,12 +536,6 @@ func (s *ProcurementOrderService) acceptTGXProcurement(procOrder *models.Procure
 		_ = s.queueClient.EnqueueProcurementPollStatus(queue.ProcurementPollStatusPayload{ProcurementOrderID: procOrder.ID}, 30*time.Second)
 	}
 	return nil
-}
-
-func queryTGXTradeByRequestNo(client *upstream.TGXClient, requestNo string) (*upstream.TGXQueryResponse, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	return client.QueryTradeByRequestNo(ctx, requestNo)
 }
 
 func (s *ProcurementOrderService) failProviderSubmitForUser(procOrder *models.ProcurementOrder, localOrder *models.Order, detail string) error {
@@ -651,7 +640,7 @@ func jsonStringMap(values models.JSON) map[string]string {
 
 func isDeliveredProviderStatus(status string) bool {
 	switch strings.ToLower(strings.TrimSpace(status)) {
-	case "delivered", "completed", "fulfilled", "success":
+	case "1", "delivered", "completed", "fulfilled", "success":
 		return true
 	default:
 		return false
@@ -1220,7 +1209,10 @@ func (s *ProcurementOrderService) pollTGXStatus(ctx context.Context, procOrder *
 		return err
 	}
 
-	mappedStatus := mapTGXProcurementStatus(status.Status)
+	mappedStatus := mapTGXProcurementStatus(status.DeliveryStatus)
+	if strings.TrimSpace(status.DeliveryStatus) == "" {
+		mappedStatus = mapTGXProcurementStatus(status.Status)
+	}
 	var fulfillment *upstream.UpstreamFulfillment
 	if strings.TrimSpace(status.Secret) != "" && mappedStatus == "delivered" {
 		fulfillment = &upstream.UpstreamFulfillment{
@@ -1424,7 +1416,7 @@ func mapFansGurusProcurementStatus(status string) string {
 func mapTGXProcurementStatus(status string) string {
 	normalized := normalizeProviderStatusToken(status)
 	switch normalized {
-	case "completed", "complete", "delivered", "fulfilled", "success":
+	case "1", "completed", "complete", "delivered", "fulfilled", "success":
 		return "delivered"
 	case "canceled", "cancelled", "closed":
 		return "canceled"

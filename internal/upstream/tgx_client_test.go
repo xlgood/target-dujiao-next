@@ -35,13 +35,23 @@ func TestTGXSignerSortsDropsEmptyAndDecodes(t *testing.T) {
 	}
 }
 
+func TestTGXSignerPreservesLiteralPlusAfterDocumentedQueryDecoding(t *testing.T) {
+	params := url.Values{
+		"note":   []string{"A+B"},
+		"app_id": []string{"test-app-id"},
+	}
+	if got, want := BuildTGXSignString(params, "app+secret"), "app_id=test-app-id&note=A+B&key=app+secret"; got != want {
+		t.Fatalf("sign string=%q, want %q", got, want)
+	}
+}
+
 func TestTGXClientConnectAndSignedRequest(t *testing.T) {
 	server := newTGXTestServer(t, func(r *http.Request) interface{} {
 		assertTGXPath(t, r, "/authentication/connect")
 		assertTGXSigned(t, r, "test-app-id", "app-secret")
 		return map[string]interface{}{
 			"code": 200,
-			"data": map[string]string{"shop_name": "TGX Shop", "balance": "88.00"},
+			"data": map[string]string{"shopName": "TGX Shop", "balance": "88.00"},
 		}
 	})
 	defer server.Close()
@@ -58,7 +68,7 @@ func TestTGXClientConnectAndSignedRequest(t *testing.T) {
 
 func TestTGXConnectResponseAcceptsNumericBalance(t *testing.T) {
 	var response TGXConnectResponse
-	if err := json.Unmarshal([]byte(`{"shop_name":"TGX Shop","balance":88.5}`), &response); err != nil {
+	if err := json.Unmarshal([]byte(`{"shopName":"TGX Shop","balance":88.5}`), &response); err != nil {
 		t.Fatalf("unmarshal numeric balance: %v", err)
 	}
 	if response.ShopName != "TGX Shop" || response.Balance != "88.5" {
@@ -149,31 +159,37 @@ func TestTGXClientInventoryTradeAndQuery(t *testing.T) {
 	server := newTGXTestServer(t, func(r *http.Request) interface{} {
 		switch r.URL.Path {
 		case "/commodity/inventory":
-			if got := r.FormValue("shared_code"); got != "IG-001" {
-				t.Fatalf("shared_code=%s, want IG-001", got)
+			if got := r.FormValue("sharedCode"); got != "IG-001" {
+				t.Fatalf("sharedCode=%s, want IG-001", got)
 			}
 			if got := r.FormValue("race"); got != "普通" {
 				t.Fatalf("race=%s, want 普通", got)
 			}
-			return map[string]interface{}{"code": 200, "data": map[string]interface{}{"code": "IG-001", "race": "普通", "price": 100, "stock": "5", "inventory": "5"}}
+			return map[string]interface{}{"code": 200, "data": map[string]interface{}{"count": 5, "price": 100}}
 		case "/commodity/inventoryState":
-			if got := r.FormValue("quantity"); got != "2" {
-				t.Fatalf("quantity=%s, want 2", got)
+			if got := r.FormValue("shared_code"); got != "IG-001" {
+				t.Fatalf("shared_code=%s, want IG-001", got)
 			}
-			return map[string]interface{}{"code": 200, "data": map[string]interface{}{"available": true, "quantity": 2}}
+			if got := r.FormValue("num"); got != "2" {
+				t.Fatalf("num=%s, want 2", got)
+			}
+			return map[string]interface{}{"code": 200, "data": map[string]interface{}{}}
 		case "/commodity/trade":
+			if got := r.FormValue("num"); got != "2" {
+				t.Fatalf("num=%s, want 2", got)
+			}
 			if got := r.FormValue("request_no"); got != "local-order-1" {
 				t.Fatalf("request_no=%s, want local-order-1", got)
 			}
 			if got := r.FormValue("email"); got != "buyer@example.com" {
 				t.Fatalf("email=%s, want buyer@example.com", got)
 			}
-			return map[string]interface{}{"code": 200, "data": map[string]string{"trade_no": "T202607080001", "secret": "account-secret", "status": "completed"}}
+			return map[string]interface{}{"code": 200, "data": map[string]interface{}{"trade_no": "T202607080001", "secret": "account-secret", "status": 1}}
 		case "/commodity/query":
-			if got := r.FormValue("trade_no"); got != "T202607080001" {
-				t.Fatalf("trade_no=%s, want T202607080001", got)
+			if got := r.FormValue("tradeNo"); got != "T202607080001" {
+				t.Fatalf("tradeNo=%s, want T202607080001", got)
 			}
-			return map[string]interface{}{"code": 200, "data": map[string]string{"trade_no": "T202607080001", "secret": "account-secret", "status": "completed"}}
+			return map[string]interface{}{"code": 200, "data": map[string]interface{}{"secret": "account-secret", "status": 1, "delivery_status": 1}}
 		default:
 			t.Fatalf("unexpected path: %s", r.URL.Path)
 		}
@@ -186,7 +202,7 @@ func TestTGXClientInventoryTradeAndQuery(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetInventory: %v", err)
 	}
-	if inventory.Stock != 5 || inventory.Inventory != 5 || inventory.Price != "100" {
+	if inventory.Count != 5 || inventory.Price != "100" {
 		t.Fatalf("unexpected inventory: %+v", inventory)
 	}
 
@@ -194,7 +210,7 @@ func TestTGXClientInventoryTradeAndQuery(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetInventoryState: %v", err)
 	}
-	if !state.Available || state.Quantity != 2 {
+	if !state.Available || state.Quantity != 0 {
 		t.Fatalf("unexpected inventory state: %+v", state)
 	}
 
@@ -216,31 +232,27 @@ func TestTGXClientInventoryTradeAndQuery(t *testing.T) {
 	if err != nil {
 		t.Fatalf("QueryTrade: %v", err)
 	}
-	if query.Status != "completed" || query.Secret != "account-secret" {
+	if query.Status != "1" || query.DeliveryStatus != "1" || query.Secret != "account-secret" {
 		t.Fatalf("unexpected query: %+v", query)
 	}
 }
 
-func TestTGXClientQueryTradeByRequestNo(t *testing.T) {
+func TestTGXClientInventoryStateMapsDocumentedInsufficientStock(t *testing.T) {
 	server := newTGXTestServer(t, func(r *http.Request) interface{} {
-		assertTGXPath(t, r, "/commodity/query")
-		if got := r.FormValue("request_no"); got != "local-order-1" {
-			t.Fatalf("request_no=%s, want local-order-1", got)
+		assertTGXPath(t, r, "/commodity/inventoryState")
+		if got := r.FormValue("shared_code"); got != "IG-001" {
+			t.Fatalf("shared_code=%q, want IG-001", got)
 		}
-		if r.FormValue("trade_no") != "" {
-			t.Fatal("trade_no must not be sent when querying by request_no")
+		if got := r.FormValue("num"); got != "2" {
+			t.Fatalf("num=%q, want 2", got)
 		}
-		return map[string]interface{}{"code": 200, "data": map[string]string{"trade_no": "T202607080001", "status": "pending"}}
+		return map[string]interface{}{"code": 500, "msg": "库存不足"}
 	})
 	defer server.Close()
 
-	client := NewTGXClient(server.URL, "test-app-id", "app-secret")
-	query, err := client.QueryTradeByRequestNo(context.Background(), "local-order-1")
-	if err != nil {
-		t.Fatalf("QueryTradeByRequestNo: %v", err)
-	}
-	if query.TradeNo != "T202607080001" || query.Status != "pending" {
-		t.Fatalf("unexpected query: %+v", query)
+	_, err := NewTGXClient(server.URL, "test-app-id", "app-secret").GetInventoryState(context.Background(), "IG-001", "", 2)
+	if !errors.Is(err, ErrTGXStock) {
+		t.Fatalf("error=%v, want ErrTGXStock", err)
 	}
 }
 

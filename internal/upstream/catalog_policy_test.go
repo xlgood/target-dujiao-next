@@ -265,6 +265,44 @@ func TestNewTGXCatalogItemParsesDocumentedStringFields(t *testing.T) {
 	}
 }
 
+func TestNewTGXCatalogItemUsesDocumentedCoverSortAndContactType(t *testing.T) {
+	item, err := NewTGXCatalogItem(TGXCommodity{
+		Code:        "IG-001",
+		Name:        "Instagram Account",
+		Category:    "Instagram",
+		Price:       "100.00",
+		Cover:       "https://cdn.tgx.test/cover.jpg",
+		Sort:        42,
+		ContactType: "1",
+	})
+	if err != nil {
+		t.Fatalf("NewTGXCatalogItem: %v", err)
+	}
+	if len(item.Images) != 1 || item.Images[0] != "https://cdn.tgx.test/cover.jpg" || item.SortOrder != 42 {
+		t.Fatalf("unexpected media and sort: %+v", item)
+	}
+	fields, _ := item.ManualSchema["fields"].([]map[string]interface{})
+	if len(fields) != 1 || fields[0]["key"] != "contact" || fields[0]["type"] != "email" || fields[0]["required"] != true {
+		t.Fatalf("unexpected contact schema: %+v", item.ManualSchema)
+	}
+}
+
+func TestNewTGXCatalogItemConvertsUnspecifiedSelectToText(t *testing.T) {
+	item, err := NewTGXCatalogItem(TGXCommodity{
+		Code:   "IG-001",
+		Name:   "Instagram Account",
+		Price:  "100.00",
+		Widget: json.RawMessage(`[{"cn":"区服","name":"server","type":"select"}]`),
+	})
+	if err != nil {
+		t.Fatalf("NewTGXCatalogItem: %v", err)
+	}
+	fields, _ := item.ManualSchema["fields"].([]map[string]interface{})
+	if len(fields) != 1 || fields[0]["type"] != "text" {
+		t.Fatalf("unexpected widget schema: %+v", item.ManualSchema)
+	}
+}
+
 func TestNewTGXCatalogItemNormalizesFacelookTitle(t *testing.T) {
 	item, err := NewTGXCatalogItem(TGXCommodity{
 		Code:     "FB-001",

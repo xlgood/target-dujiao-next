@@ -20,6 +20,7 @@ const defaultTGXBaseURL = "https://www.tgxaccount.com/shared"
 var (
 	ErrTGXAuth       = errors.New("tgx auth error")
 	ErrTGXBusiness   = errors.New("tgx business error")
+	ErrTGXStock      = errors.New("tgx stock insufficient")
 	ErrTGXBadJSON    = errors.New("tgx bad json")
 	ErrTGXBadPayload = errors.New("tgx bad payload")
 )
@@ -61,19 +62,22 @@ func NewTGXClient(baseURL, appID, appKey string, opts ...TGXClientOption) *TGXCl
 }
 
 type TGXConnectResponse struct {
-	ShopName string `json:"shop_name,omitempty"`
+	ShopName string `json:"shopName,omitempty"`
 	Balance  string `json:"balance,omitempty"`
 }
 
 func (r *TGXConnectResponse) UnmarshalJSON(data []byte) error {
-	type connectAlias TGXConnectResponse
 	var decoded struct {
-		*connectAlias
-		Balance json.RawMessage `json:"balance"`
+		ShopName       string          `json:"shopName"`
+		LegacyShopName string          `json:"shop_name"`
+		Balance        json.RawMessage `json:"balance"`
 	}
-	decoded.connectAlias = (*connectAlias)(r)
 	if err := json.Unmarshal(data, &decoded); err != nil {
 		return err
+	}
+	r.ShopName = strings.TrimSpace(decoded.ShopName)
+	if r.ShopName == "" {
+		r.ShopName = strings.TrimSpace(decoded.LegacyShopName)
 	}
 	balance, err := decodeTGXStringOrNumber(decoded.Balance)
 	if err != nil {
@@ -102,6 +106,7 @@ type TGXCommodity struct {
 	InventoryHidden string          `json:"inventory_hidden,omitempty"`
 	Minimum         int             `json:"minimum,omitempty"`
 	PurchaseCount   int             `json:"purchase_count,omitempty"`
+	Sort            int             `json:"sort,omitempty"`
 }
 
 func (c *TGXCommodity) UnmarshalJSON(data []byte) error {
@@ -185,14 +190,13 @@ type tgxCatalogCategory struct {
 }
 
 type TGXInventoryResponse struct {
-	Code      string          `json:"code,omitempty"`
-	Race      string          `json:"race,omitempty"`
-	Price     string          `json:"price,omitempty"`
-	Stock     int             `json:"stock,omitempty"`
-	Inventory int             `json:"inventory,omitempty"`
-	Widget    json.RawMessage `json:"widget,omitempty"`
-	Config    json.RawMessage `json:"config,omitempty"`
-	Raw       json.RawMessage `json:"-"`
+	Code   string          `json:"code,omitempty"`
+	Race   string          `json:"race,omitempty"`
+	Count  int             `json:"count,omitempty"`
+	Price  string          `json:"price,omitempty"`
+	Widget json.RawMessage `json:"widget,omitempty"`
+	Config json.RawMessage `json:"config,omitempty"`
+	Raw    json.RawMessage `json:"-"`
 }
 
 // UnmarshalJSON accepts the mixed scalar types used by TGX inventory
@@ -201,9 +205,8 @@ func (r *TGXInventoryResponse) UnmarshalJSON(data []byte) error {
 	type inventoryAlias TGXInventoryResponse
 	var decoded struct {
 		*inventoryAlias
-		Price     json.RawMessage `json:"price"`
-		Stock     json.RawMessage `json:"stock"`
-		Inventory json.RawMessage `json:"inventory"`
+		Count json.RawMessage `json:"count"`
+		Price json.RawMessage `json:"price"`
 	}
 	decoded.inventoryAlias = (*inventoryAlias)(r)
 	if err := json.Unmarshal(data, &decoded); err != nil {
@@ -213,10 +216,7 @@ func (r *TGXInventoryResponse) UnmarshalJSON(data []byte) error {
 	if r.Price, err = decodeTGXStringOrNumber(decoded.Price); err != nil {
 		return err
 	}
-	if r.Stock, err = decodeTGXInt(decoded.Stock); err != nil {
-		return err
-	}
-	if r.Inventory, err = decodeTGXInt(decoded.Inventory); err != nil {
+	if r.Count, err = decodeTGXInt(decoded.Count); err != nil {
 		return err
 	}
 	return nil
@@ -246,11 +246,52 @@ type TGXTradeResponse struct {
 	Status  string          `json:"status,omitempty"`
 }
 
+func (r *TGXTradeResponse) UnmarshalJSON(data []byte) error {
+	type tradeAlias TGXTradeResponse
+	var decoded struct {
+		*tradeAlias
+		Status json.RawMessage `json:"status"`
+	}
+	decoded.tradeAlias = (*tradeAlias)(r)
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	status, err := decodeTGXStringOrNumber(decoded.Status)
+	if err != nil {
+		return err
+	}
+	r.Status = status
+	return nil
+}
+
 type TGXQueryResponse struct {
-	TradeNo string          `json:"trade_no"`
-	Secret  string          `json:"secret,omitempty"`
-	Widget  json.RawMessage `json:"widget,omitempty"`
-	Status  string          `json:"status,omitempty"`
+	TradeNo        string          `json:"trade_no"`
+	Secret         string          `json:"secret,omitempty"`
+	Widget         json.RawMessage `json:"widget,omitempty"`
+	Status         string          `json:"status,omitempty"`
+	DeliveryStatus string          `json:"delivery_status,omitempty"`
+}
+
+func (r *TGXQueryResponse) UnmarshalJSON(data []byte) error {
+	type queryAlias TGXQueryResponse
+	var decoded struct {
+		*queryAlias
+		Status         json.RawMessage `json:"status"`
+		DeliveryStatus json.RawMessage `json:"delivery_status"`
+	}
+	decoded.queryAlias = (*queryAlias)(r)
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	status, err := decodeTGXStringOrNumber(decoded.Status)
+	if err != nil {
+		return err
+	}
+	r.Status = status
+	if r.DeliveryStatus, err = decodeTGXStringOrNumber(decoded.DeliveryStatus); err != nil {
+		return err
+	}
+	return nil
 }
 
 type TGXError struct {
@@ -294,7 +335,7 @@ func (c *TGXClient) ListItems(ctx context.Context) (*TGXItemsResponse, error) {
 }
 
 func (c *TGXClient) GetItem(ctx context.Context, sharedCode string) (*TGXCommodity, error) {
-	values := url.Values{"shared_code": []string{sharedCode}}
+	values := url.Values{"sharedCode": []string{sharedCode}}
 	var result TGXCommodity
 	if err := c.postForm(ctx, "/commodity/item", values, &result); err != nil {
 		return nil, err
@@ -303,7 +344,7 @@ func (c *TGXClient) GetItem(ctx context.Context, sharedCode string) (*TGXCommodi
 }
 
 func (c *TGXClient) GetInventory(ctx context.Context, sharedCode, race string) (*TGXInventoryResponse, error) {
-	values := url.Values{"shared_code": []string{sharedCode}}
+	values := url.Values{"sharedCode": []string{sharedCode}}
 	setNonEmpty(values, "race", race)
 	var result TGXInventoryResponse
 	if err := c.postForm(ctx, "/commodity/inventory", values, &result); err != nil {
@@ -315,18 +356,26 @@ func (c *TGXClient) GetInventory(ctx context.Context, sharedCode, race string) (
 func (c *TGXClient) GetInventoryState(ctx context.Context, sharedCode, race string, quantity int) (*TGXInventoryStateResponse, error) {
 	values := url.Values{"shared_code": []string{sharedCode}}
 	setNonEmpty(values, "race", race)
-	setPositiveInt(values, "quantity", quantity)
+	setPositiveInt(values, "num", quantity)
 	var result TGXInventoryStateResponse
 	if err := c.postForm(ctx, "/commodity/inventoryState", values, &result); err != nil {
+		var providerErr *TGXError
+		if errors.As(err, &providerErr) && providerErr.Code == "500" {
+			return nil, fmt.Errorf("%w: %v", ErrTGXStock, err)
+		}
 		return nil, err
 	}
+	// TGX documents this endpoint as status-code based: HTTP/API success means
+	// the requested quantity is purchasable, while insufficient stock returns
+	// code 500. Some installations therefore return no availability field.
+	result.Available = true
 	return &result, nil
 }
 
 func (c *TGXClient) Trade(ctx context.Context, req TGXTradeRequest) (*TGXTradeResponse, error) {
 	values := url.Values{"shared_code": []string{req.SharedCode}}
 	setNonEmpty(values, "race", req.Race)
-	setPositiveInt(values, "quantity", req.Quantity)
+	setPositiveInt(values, "num", req.Quantity)
 	setNonEmpty(values, "request_no", req.RequestNo)
 	for key, value := range req.Widget {
 		setNonEmpty(values, key, value)
@@ -340,16 +389,7 @@ func (c *TGXClient) Trade(ctx context.Context, req TGXTradeRequest) (*TGXTradeRe
 }
 
 func (c *TGXClient) QueryTrade(ctx context.Context, tradeNo string) (*TGXQueryResponse, error) {
-	values := url.Values{"trade_no": []string{tradeNo}}
-	var result TGXQueryResponse
-	if err := c.postForm(ctx, "/commodity/query", values, &result); err != nil {
-		return nil, err
-	}
-	return &result, nil
-}
-
-func (c *TGXClient) QueryTradeByRequestNo(ctx context.Context, requestNo string) (*TGXQueryResponse, error) {
-	values := url.Values{"request_no": []string{requestNo}}
+	values := url.Values{"tradeNo": []string{tradeNo}}
 	var result TGXQueryResponse
 	if err := c.postForm(ctx, "/commodity/query", values, &result); err != nil {
 		return nil, err
