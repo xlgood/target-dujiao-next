@@ -414,7 +414,7 @@ func (s *ProcurementOrderService) submitFansGurusProcurement(ctx context.Context
 		"upstream_order_id": resp.Order,
 		"upstream_order_no": fmt.Sprintf("%d", resp.Order),
 		"upstream_amount":   resp.Charge,
-		"upstream_currency": "CNY",
+		"upstream_currency": "USD",
 		"error_message":     "",
 		"retry_count":       0,
 		"updated_at":        now,
@@ -518,7 +518,7 @@ func (s *ProcurementOrderService) acceptTGXProcurement(procOrder *models.Procure
 	now := time.Now()
 	updates := map[string]interface{}{
 		"upstream_order_no": strings.TrimSpace(tradeNo),
-		"upstream_currency": "USD",
+		"upstream_currency": "CNY",
 		"error_message":     "",
 		"retry_count":       0,
 		"updated_at":        now,
