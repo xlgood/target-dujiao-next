@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -160,6 +161,18 @@ func decodeTGXStringOrNumber(raw json.RawMessage) (string, error) {
 	return number.String(), nil
 }
 
+func decodeTGXInt(raw json.RawMessage) (int, error) {
+	value, err := decodeTGXStringOrNumber(raw)
+	if err != nil || value == "" {
+		return 0, err
+	}
+	parsed, err := strconv.Atoi(value)
+	if err != nil {
+		return 0, fmt.Errorf("parse tgx integer %q: %w", value, err)
+	}
+	return parsed, nil
+}
+
 type TGXItemsResponse struct {
 	Items      []TGXCommodity  `json:"items,omitempty"`
 	Categories json.RawMessage `json:"categories,omitempty"`
@@ -180,6 +193,33 @@ type TGXInventoryResponse struct {
 	Widget    json.RawMessage `json:"widget,omitempty"`
 	Config    json.RawMessage `json:"config,omitempty"`
 	Raw       json.RawMessage `json:"-"`
+}
+
+// UnmarshalJSON accepts the mixed scalar types used by TGX inventory
+// responses. The same API may return stock as either 27 or "27".
+func (r *TGXInventoryResponse) UnmarshalJSON(data []byte) error {
+	type inventoryAlias TGXInventoryResponse
+	var decoded struct {
+		*inventoryAlias
+		Price     json.RawMessage `json:"price"`
+		Stock     json.RawMessage `json:"stock"`
+		Inventory json.RawMessage `json:"inventory"`
+	}
+	decoded.inventoryAlias = (*inventoryAlias)(r)
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	var err error
+	if r.Price, err = decodeTGXStringOrNumber(decoded.Price); err != nil {
+		return err
+	}
+	if r.Stock, err = decodeTGXInt(decoded.Stock); err != nil {
+		return err
+	}
+	if r.Inventory, err = decodeTGXInt(decoded.Inventory); err != nil {
+		return err
+	}
+	return nil
 }
 
 type TGXInventoryStateResponse struct {

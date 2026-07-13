@@ -155,7 +155,7 @@ func TestTGXClientInventoryTradeAndQuery(t *testing.T) {
 			if got := r.FormValue("race"); got != "普通" {
 				t.Fatalf("race=%s, want 普通", got)
 			}
-			return map[string]interface{}{"code": 200, "data": map[string]interface{}{"code": "IG-001", "race": "普通", "price": "100.00", "stock": 5}}
+			return map[string]interface{}{"code": 200, "data": map[string]interface{}{"code": "IG-001", "race": "普通", "price": 100, "stock": "5", "inventory": "5"}}
 		case "/commodity/inventoryState":
 			if got := r.FormValue("quantity"); got != "2" {
 				t.Fatalf("quantity=%s, want 2", got)
@@ -186,7 +186,7 @@ func TestTGXClientInventoryTradeAndQuery(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetInventory: %v", err)
 	}
-	if inventory.Stock != 5 || inventory.Price != "100.00" {
+	if inventory.Stock != 5 || inventory.Inventory != 5 || inventory.Price != "100" {
 		t.Fatalf("unexpected inventory: %+v", inventory)
 	}
 
