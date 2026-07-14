@@ -1,7 +1,6 @@
 package service
 
 import (
-	"context"
 	"crypto/sha1"
 	"encoding/hex"
 	"errors"
@@ -79,10 +78,12 @@ func (s *ProductMappingService) importProviderCatalogItem(connectionID uint, ite
 	}
 	if existing, lookupErr := s.mappingRepo.GetByConnectionAndUpstreamCode(connectionID, item.Code); lookupErr == nil && existing != nil {
 		if existingProduct, getErr := s.productRepo.GetByID(strconv.FormatUint(uint64(existing.LocalProductID), 10)); getErr == nil && existingProduct != nil {
-			item.Images = s.localizeProviderCatalogImages(item, conn, existingProduct.Images)
+			// Keep previously downloaded covers. Downloading every TGX image inside
+			// the catalog request makes a large sync exceed the reverse-proxy timeout.
+			if len(existingProduct.Images) > 0 && strings.HasPrefix(strings.TrimSpace(existingProduct.Images[0]), "/uploads/") {
+				item.Images = []string(existingProduct.Images)
+			}
 		}
-	} else {
-		item.Images = s.localizeProviderCatalogImages(item, conn, nil)
 	}
 	price, cost, err := providerCatalogAmounts(item.Provider, item.UpstreamPrice, item.TargetPrice, conn)
 	if err != nil {
@@ -107,31 +108,6 @@ func (s *ProductMappingService) importProviderCatalogItem(connectionID uint, ite
 		return false, false, err
 	}
 	return created, updated, nil
-}
-
-func (s *ProductMappingService) localizeProviderCatalogImages(item upstream.ProviderCatalogItem, conn *models.SiteConnection, existing models.StringArray) []string {
-	if item.Provider != upstream.CatalogProviderTGX || conn == nil || len(item.Images) == 0 {
-		return item.Images
-	}
-	if len(existing) > 0 && strings.HasPrefix(strings.TrimSpace(existing[0]), "/uploads/") {
-		return []string(existing)
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	client := upstream.NewTGXClient(conn.BaseURL, conn.ApiKey, "")
-	localized := make([]string, 0, len(item.Images))
-	for _, imageURL := range item.Images {
-		localPath, err := client.DownloadImage(ctx, imageURL, "uploads")
-		if err != nil {
-			localized = append(localized, imageURL)
-			continue
-		}
-		if s.mediaService != nil {
-			s.mediaService.RecordLocalFile(localPath, "upstream")
-		}
-		localized = append(localized, localPath)
-	}
-	return localized
 }
 
 func (s *ProductMappingService) importProviderCatalogItemInTx(tx *gorm.DB, connectionID uint, item upstream.ProviderCatalogItem, platform string, price decimal.Decimal, cost decimal.Decimal, conn *models.SiteConnection, imported *bool) error {
