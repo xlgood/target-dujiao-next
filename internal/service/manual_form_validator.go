@@ -3,6 +3,7 @@ package service
 import (
 	"html"
 	"net/mail"
+	"net/url"
 	"regexp"
 	"sort"
 	"strconv"
@@ -17,6 +18,7 @@ const (
 	manualFormTypeTextarea = "textarea"
 	manualFormTypePhone    = "phone"
 	manualFormTypeEmail    = "email"
+	manualFormTypeURL      = "url"
 	manualFormTypeNumber   = "number"
 	manualFormTypeSelect   = "select"
 	manualFormTypeRadio    = "radio"
@@ -275,6 +277,32 @@ func normalizeManualFormFieldValue(field manualFormField, rawValue interface{}) 
 			}
 		}
 		return sanitizeManualFormText(text), true, nil
+	case manualFormTypeURL:
+		text, ok := rawValue.(string)
+		if !ok {
+			return nil, false, ErrManualFormTypeInvalid
+		}
+		text = strings.TrimSpace(text)
+		if text == "" {
+			return nil, false, nil
+		}
+		if field.MaxLen != nil && utf8.RuneCountInString(text) > *field.MaxLen {
+			return nil, false, ErrManualFormFieldInvalid
+		}
+		parsed, err := url.ParseRequestURI(text)
+		if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+			return nil, false, ErrManualFormFieldInvalid
+		}
+		if field.Regex != "" {
+			compiled, err := compileManualFormRegex(field.Regex)
+			if err != nil {
+				return nil, false, ErrManualFormSchemaInvalid
+			}
+			if !compiled.MatchString(text) {
+				return nil, false, ErrManualFormFieldInvalid
+			}
+		}
+		return sanitizeManualFormText(text), true, nil
 	case manualFormTypePhone:
 		text, ok := rawValue.(string)
 		if !ok {
@@ -467,6 +495,7 @@ func isSupportedManualFormType(value string) bool {
 		manualFormTypeTextarea,
 		manualFormTypePhone,
 		manualFormTypeEmail,
+		manualFormTypeURL,
 		manualFormTypeNumber,
 		manualFormTypeSelect,
 		manualFormTypeRadio,

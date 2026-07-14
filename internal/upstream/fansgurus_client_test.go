@@ -121,16 +121,6 @@ func TestFansGurusClientGetOrderStatus(t *testing.T) {
 	}
 }
 
-func TestFansGurusTargetRatePreservesPerThousandBasis(t *testing.T) {
-	got, err := FansGurusTargetRate("2.00")
-	if err != nil {
-		t.Fatalf("FansGurusTargetRate: %v", err)
-	}
-	if got != "10.00000000" {
-		t.Fatalf("target rate=%s, want 10.00000000", got)
-	}
-}
-
 func TestFansGurusClientClassifiesAndRedactsAPIError(t *testing.T) {
 	server := newFansGurusTestServer(t, func(r *http.Request) interface{} {
 		assertFansGurusAction(t, r, "balance")

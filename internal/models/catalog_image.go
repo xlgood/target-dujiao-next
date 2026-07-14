@@ -17,6 +17,6 @@ func ProviderCatalogImagePath(platform string) string {
 	case "x":
 		return "/uploads/catalog/x.svg"
 	default:
-		return ""
+		return "/uploads/catalog/social.svg"
 	}
 }

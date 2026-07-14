@@ -580,6 +580,15 @@ func (s *ProductMappingService) syncConnectionStock(connectionID uint, connMappi
 	if err != nil || conn == nil {
 		return fmt.Errorf("get connection %d: %w", connectionID, err)
 	}
+	switch conn.Protocol {
+	case constants.ConnectionProtocolTGXAccount:
+		return s.syncTGXConnectionStock(conn, connMappings)
+	case constants.ConnectionProtocolFansGurus:
+		// FansGurus has no inventory endpoint. Its availability is maintained by
+		// the provider catalog sync and the upstream order result, not by a fake
+		// per-SKU inventory refresh.
+		return nil
+	}
 
 	adapter, err := s.connService.GetAdapter(conn)
 	if err != nil {
@@ -744,6 +753,90 @@ func (s *ProductMappingService) syncConnectionStock(connectionID uint, connMappi
 		"fetch_complete", fetchComplete,
 	)
 	return nil
+}
+
+type tgxInventoryRefresh struct {
+	mapping *models.SKUMapping
+	count   int
+	err     error
+}
+
+// syncTGXConnectionStock refreshes every TGX SKU directly from the TGX
+// inventory API. TGX uses string shared codes, so it cannot use the generic
+// Dujiao-Next adapter-based stock sync.
+func (s *ProductMappingService) syncTGXConnectionStock(conn *models.SiteConnection, productMappings []models.ProductMapping) error {
+	if s == nil || conn == nil || s.skuMappingRepo == nil || s.connService == nil {
+		return errorsProductMappingDependencyMissing()
+	}
+	mappingIDs := make([]uint, 0, len(productMappings))
+	for _, mapping := range productMappings {
+		if mapping.Provider == upstream.CatalogProviderTGX {
+			mappingIDs = append(mappingIDs, mapping.ID)
+		}
+	}
+	if len(mappingIDs) == 0 {
+		return nil
+	}
+	skuMappings, err := s.skuMappingRepo.ListByProductMappingIDs(mappingIDs)
+	if err != nil || len(skuMappings) == 0 {
+		return err
+	}
+	appKey, err := s.connService.DecryptSecret(conn.ApiSecret)
+	if err != nil {
+		return err
+	}
+	client := upstream.NewTGXClient(conn.BaseURL, conn.ApiKey, appKey)
+	jobs := make(chan *models.SKUMapping)
+	results := make(chan tgxInventoryRefresh, len(skuMappings))
+	var wg sync.WaitGroup
+	const concurrency = 8
+	for range concurrency {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for skuMapping := range jobs {
+				sharedCode, race := splitTGXUpstreamSKUCode(skuMapping.UpstreamSKUCode)
+				if sharedCode == "" {
+					results <- tgxInventoryRefresh{mapping: skuMapping, err: fmt.Errorf("invalid TGX shared code for SKU mapping %d", skuMapping.ID)}
+					continue
+				}
+				ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+				inventory, inventoryErr := client.GetInventory(ctx, sharedCode, race)
+				cancel()
+				if inventoryErr != nil {
+					results <- tgxInventoryRefresh{mapping: skuMapping, err: inventoryErr}
+					continue
+				}
+				if inventory == nil {
+					results <- tgxInventoryRefresh{mapping: skuMapping, err: fmt.Errorf("empty TGX inventory response for %s", sharedCode)}
+					continue
+				}
+				results <- tgxInventoryRefresh{mapping: skuMapping, count: inventory.Count}
+			}
+		}()
+	}
+	for i := range skuMappings {
+		jobs <- &skuMappings[i]
+	}
+	close(jobs)
+	wg.Wait()
+	close(results)
+
+	now := time.Now()
+	var errs []error
+	for result := range results {
+		if result.err != nil {
+			errs = append(errs, result.err)
+			continue
+		}
+		result.mapping.UpstreamStock = result.count
+		result.mapping.UpstreamIsActive = result.count > 0
+		result.mapping.StockSyncedAt = &now
+		if err := s.skuMappingRepo.Update(result.mapping); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
 }
 
 // syncProductFromData 使用已拉取的上游数据同步单个映射（不再发 HTTP 请求）

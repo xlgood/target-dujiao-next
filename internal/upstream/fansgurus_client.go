@@ -10,8 +10,6 @@ import (
 	"net/url"
 	"strings"
 	"time"
-
-	"github.com/shopspring/decimal"
 )
 
 const defaultFansGurusBaseURL = "https://fansgurus.com/api/v2"
@@ -83,7 +81,7 @@ type FansGurusAddOrderRequest struct {
 	Comments     string
 	AnswerNumber string
 	Groups       string
-	Usernames    string
+	Username     string
 	Runs         int
 	Interval     int
 	Min          int
@@ -159,7 +157,7 @@ func (c *FansGurusClient) AddOrder(ctx context.Context, req FansGurusAddOrderReq
 	setNonEmpty(values, "comments", req.Comments)
 	setNonEmpty(values, "answer_number", req.AnswerNumber)
 	setNonEmpty(values, "groups", req.Groups)
-	setNonEmpty(values, "usernames", req.Usernames)
+	setNonEmpty(values, "username", req.Username)
 	setPositiveInt(values, "runs", req.Runs)
 	setPositiveInt(values, "interval", req.Interval)
 	setPositiveInt(values, "min", req.Min)
@@ -186,14 +184,6 @@ func (c *FansGurusClient) GetOrderStatus(ctx context.Context, upstreamOrderID ui
 		return nil, err
 	}
 	return &result, nil
-}
-
-func FansGurusTargetRate(rate string) (string, error) {
-	amount, err := decimal.NewFromString(strings.TrimSpace(rate))
-	if err != nil {
-		return "", fmt.Errorf("parse fansgurus rate: %w", err)
-	}
-	return amount.Mul(decimal.NewFromInt(5)).StringFixedBank(8), nil
 }
 
 func (c *FansGurusClient) postForm(ctx context.Context, values url.Values, result interface{}) error {

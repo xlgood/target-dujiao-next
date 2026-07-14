@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-label="Social service">
+  <rect width="256" height="256" rx="48" fill="#334155"/>
+  <circle cx="128" cy="90" r="38" fill="#e2e8f0"/>
+  <path d="M52 210c8-48 38-72 76-72s68 24 76 72" fill="#94a3b8"/>
+</svg>

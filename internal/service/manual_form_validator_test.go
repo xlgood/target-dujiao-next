@@ -174,6 +174,31 @@ func TestValidateAndNormalizeManualFormEmailPhoneAndCheckbox(t *testing.T) {
 	}
 }
 
+func TestValidateAndNormalizeManualFormURL(t *testing.T) {
+	schema := models.JSON{
+		"fields": []interface{}{
+			map[string]interface{}{
+				"key":      "link",
+				"type":     "url",
+				"required": true,
+			},
+		},
+	}
+
+	_, normalized, err := validateAndNormalizeManualForm(schema, models.JSON{"link": " https://example.com/post/1 "})
+	if err != nil {
+		t.Fatalf("expected valid URL, got %v", err)
+	}
+	if normalized["link"] != "https://example.com/post/1" {
+		t.Fatalf("unexpected normalized URL: %v", normalized["link"])
+	}
+
+	_, _, err = validateAndNormalizeManualForm(schema, models.JSON{"link": "example.com/post/1"})
+	if !errors.Is(err, ErrManualFormFieldInvalid) {
+		t.Fatalf("expected invalid URL error, got %v", err)
+	}
+}
+
 func TestValidateAndNormalizeManualFormSanitizeText(t *testing.T) {
 	schema := models.JSON{
 		"fields": []interface{}{

@@ -61,30 +61,17 @@ func (s *ProductMappingService) ReapplyMarkup(connectionID uint) (int, error) {
 }
 
 func providerMappingLocalPrice(provider string, upstreamPrice decimal.Decimal, conn *models.SiteConnection) decimal.Decimal {
-	switch provider {
-	case upstream.CatalogProviderFansGurus:
-		price, err := upstream.FansGurusTargetRate(upstreamPrice.String())
-		if err == nil {
-			if parsed, parseErr := decimal.NewFromString(price); parseErr == nil {
-				return parsed
-			}
-		}
-	case upstream.CatalogProviderTGX:
-		if conn != nil {
-			if conn.ExchangeRate.LessThanOrEqual(decimal.Zero) || conn.ExchangeRate.GreaterThanOrEqual(decimal.NewFromInt(1)) {
-				return decimal.Zero
-			}
-			return CalculateLocalPrice(upstreamPrice, conn.ExchangeRate, conn.PriceMarkupPercent, conn.PriceRoundingMode)
-		}
-	}
 	if conn == nil {
 		return upstreamPrice
+	}
+	if provider == upstream.CatalogProviderTGX && (conn.ExchangeRate.LessThanOrEqual(decimal.Zero) || conn.ExchangeRate.GreaterThanOrEqual(decimal.NewFromInt(1))) {
+		return decimal.Zero
 	}
 	return CalculateLocalPrice(upstreamPrice, conn.ExchangeRate, conn.PriceMarkupPercent, conn.PriceRoundingMode)
 }
 
 func providerMappingCostPrice(provider string, upstreamPrice decimal.Decimal, conn *models.SiteConnection) decimal.Decimal {
-	if provider == upstream.CatalogProviderFansGurus || conn == nil {
+	if conn == nil {
 		return upstreamPrice.Round(2)
 	}
 	return convertCurrency(upstreamPrice, conn.ExchangeRate).Round(2)

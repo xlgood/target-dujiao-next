@@ -26,7 +26,7 @@ func TestNormalizePlatformAliases(t *testing.T) {
 	}
 }
 
-func TestProviderCatalogPlatformPrefersTitleAndRejectsUnsupportedTitles(t *testing.T) {
+func TestProviderCatalogPlatformPrefersTitle(t *testing.T) {
 	cases := []struct {
 		name string
 		item ProviderCatalogItem
@@ -37,26 +37,8 @@ func TestProviderCatalogPlatformPrefersTitleAndRejectsUnsupportedTitles(t *testi
 			item: ProviderCatalogItem{Name: "Instagram aged account", Category: "Facebook"},
 			want: "instagram",
 		},
-		{
-			name: "gmail is not misclassified by category",
-			item: ProviderCatalogItem{Name: "Gmail account", Category: "YouTube", Description: "Facebook recovery"},
-			want: "",
-		},
-		{
-			name: "gmail mentioning youtube remains unsupported",
-			item: ProviderCatalogItem{Name: "2024 Gmail account with 2FA, supports ads and YouTube", Category: "YouTube"},
-			want: "",
-		},
-		{
-			name: "gmail mentioning yt remains unsupported",
-			item: ProviderCatalogItem{Name: "GMAIL aged account, unused ADS, YT and MAPS", Category: "YouTube"},
-			want: "",
-		},
-		{
-			name: "gmail title is always excluded from social catalog",
-			item: ProviderCatalogItem{Name: "Facebook recovery Gmail account", Category: "Facebook"},
-			want: "",
-		},
+		{name: "gmail takes priority over category", item: ProviderCatalogItem{Name: "Gmail account", Category: "YouTube"}, want: "gmail"},
+		{name: "outlook", item: ProviderCatalogItem{Name: "Outlook account"}, want: "outlook"},
 		{
 			name: "facebook account may mention hotmail verification",
 			item: ProviderCatalogItem{Name: "FB aged account with Hotmail verification", Category: "Facebook"},
@@ -99,38 +81,38 @@ func TestContainsTelegramCatalogText(t *testing.T) {
 	}
 }
 
-func TestBuildFilteredCatalogExcludesTelegramAndNonIntersection(t *testing.T) {
+func TestBuildFilteredCatalogUsesIndependentProviderAllowlists(t *testing.T) {
 	fans := []ProviderCatalogItem{
 		{Provider: CatalogProviderFansGurus, Code: "fg-ig", Name: "Instagram Followers", Category: "Instagram", Active: true},
-		{Provider: CatalogProviderFansGurus, Code: "fg-yt", Name: "YouTube Views", Category: "YouTube", Active: true},
+		{Provider: CatalogProviderFansGurus, Code: "fg-vk", Name: "VK Followers", Category: "VK", Active: true},
 		{Provider: CatalogProviderFansGurus, Code: "fg-tg", Name: "Telegram Members", Category: "Telegram", Active: true},
 	}
 	tgx := []ProviderCatalogItem{
 		{Provider: CatalogProviderTGX, Code: "tgx-ig", Name: "IG Account", Description: "Instagram aged account", Active: true},
-		{Provider: CatalogProviderTGX, Code: "tgx-fb", Name: "Facebook Account", Description: "Facebook account", Active: true},
+		{Provider: CatalogProviderTGX, Code: "tgx-mail", Name: "Gmail Account", Active: true},
 		{Provider: CatalogProviderTGX, Code: "tgx-tg", Name: "Account", RawText: []string{`{"label":"纸飞机 username"}`}, Active: true},
 	}
 
 	result := BuildFilteredCatalog(fans, tgx)
 
-	if len(result.SupportedPlatforms) != 1 || result.SupportedPlatforms[0] != "instagram" {
-		t.Fatalf("supported platforms=%v, want [instagram]", result.SupportedPlatforms)
+	if len(result.SupportedPlatforms) != 3 {
+		t.Fatalf("supported platforms=%v, want gmail, instagram, vk", result.SupportedPlatforms)
 	}
-	if len(result.FansGurus) != 1 || result.FansGurus[0].Code != "fg-ig" {
-		t.Fatalf("fans kept=%+v, want only fg-ig", result.FansGurus)
+	if len(result.FansGurus) != 2 {
+		t.Fatalf("fans kept=%+v, want instagram and vk", result.FansGurus)
 	}
-	if len(result.TGX) != 1 || result.TGX[0].Code != "tgx-ig" {
-		t.Fatalf("tgx kept=%+v, want only tgx-ig", result.TGX)
+	if len(result.TGX) != 2 {
+		t.Fatalf("tgx kept=%+v, want instagram and gmail", result.TGX)
 	}
 	if len(result.FilteredTelegram) != 2 {
 		t.Fatalf("telegram filtered count=%d, want 2", len(result.FilteredTelegram))
 	}
-	if len(result.FilteredPlatform) != 2 {
-		t.Fatalf("platform filtered count=%d, want 2", len(result.FilteredPlatform))
+	if len(result.FilteredPlatform) != 0 {
+		t.Fatalf("platform filtered count=%d, want 0", len(result.FilteredPlatform))
 	}
 }
 
-func TestBuildFilteredCatalogIgnoresInactiveItemsForIntersection(t *testing.T) {
+func TestBuildFilteredCatalogFiltersInactiveAndProviderDisallowedPlatforms(t *testing.T) {
 	fans := []ProviderCatalogItem{
 		{Provider: CatalogProviderFansGurus, Code: "fg-ig", Name: "Instagram Followers", Category: "Instagram", Active: true},
 		{Provider: CatalogProviderFansGurus, Code: "fg-fb", Name: "Facebook Likes", Category: "Facebook", Active: false},
@@ -142,14 +124,14 @@ func TestBuildFilteredCatalogIgnoresInactiveItemsForIntersection(t *testing.T) {
 
 	result := BuildFilteredCatalog(fans, tgx)
 
-	if len(result.SupportedPlatforms) != 1 || result.SupportedPlatforms[0] != "instagram" {
-		t.Fatalf("supported platforms=%v, want [instagram]", result.SupportedPlatforms)
+	if len(result.SupportedPlatforms) != 2 {
+		t.Fatalf("supported platforms=%v, want facebook and instagram", result.SupportedPlatforms)
 	}
 	if len(result.FilteredInactive) != 1 || result.FilteredInactive[0].Code != "fg-fb" {
 		t.Fatalf("inactive filtered=%+v, want fg-fb", result.FilteredInactive)
 	}
-	if len(result.FilteredPlatform) != 1 || result.FilteredPlatform[0].Code != "tgx-fb" {
-		t.Fatalf("platform filtered=%+v, want tgx-fb", result.FilteredPlatform)
+	if len(result.FilteredPlatform) != 0 {
+		t.Fatalf("platform filtered=%+v, want none", result.FilteredPlatform)
 	}
 }
 
@@ -168,8 +150,8 @@ func TestProviderCatalogItemPriceRules(t *testing.T) {
 	if fansItem.Code != "123" {
 		t.Fatalf("fans code=%q, want 123", fansItem.Code)
 	}
-	if fansItem.TargetPrice != "10.00000000" {
-		t.Fatalf("fans target=%s, want 10.00000000", fansItem.TargetPrice)
+	if fansItem.TargetPrice != "2.00" {
+		t.Fatalf("fans target=%s, want raw upstream amount", fansItem.TargetPrice)
 	}
 	if fansItem.PriceQuantityBasis != 1000 {
 		t.Fatalf("fans price quantity basis=%d, want 1000", fansItem.PriceQuantityBasis)
@@ -196,7 +178,7 @@ func TestProviderCatalogItemPriceRules(t *testing.T) {
 	}
 }
 
-func TestNewFansGurusCatalogItemDisablesUnsupportedServiceTypes(t *testing.T) {
+func TestNewFansGurusCatalogItemEnablesSupportedServiceTypes(t *testing.T) {
 	item, err := NewFansGurusCatalogItem(FansGurusService{
 		Service:  456,
 		Name:     "Instagram Custom Comments",
@@ -207,8 +189,8 @@ func TestNewFansGurusCatalogItemDisablesUnsupportedServiceTypes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewFansGurusCatalogItem: %v", err)
 	}
-	if item.Active {
-		t.Fatalf("unsupported FansGurus type must not be imported: %+v", item)
+	if !item.Active {
+		t.Fatalf("supported FansGurus type must be imported: %+v", item)
 	}
 }
 

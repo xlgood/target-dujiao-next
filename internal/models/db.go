@@ -21,7 +21,7 @@ const (
 	paymentProviderBepusdtRenameMigrationSettingKey = "migration/payment_provider_bepusdt_rename_v1"
 	orderItemOriginalPriceMigrationKey              = "migration/order_item_original_price_v1"
 	fansGurusPriceBasisMigrationSettingKey          = "migration/fansgurus_price_basis_v1"
-	providerCatalogImageMigrationSettingKey         = "migration/provider_catalog_images_v1"
+	providerCatalogImageMigrationSettingKey         = "migration/provider_catalog_images_v3"
 	tgxUnknownStockMigrationSettingKey              = "migration/tgx_unknown_stock_v1"
 	manualStockUnlimitedValue                       = -1
 )

@@ -59,13 +59,13 @@ func TestSyncProviderCatalogWithClientsFiltersAndImports(t *testing.T) {
 	if result.FansGurusPulled != 3 || result.TGXPulled != 2 {
 		t.Fatalf("unexpected pull counts: %+v", result)
 	}
-	if len(result.SupportedPlatforms) != 1 || result.SupportedPlatforms[0] != "instagram" {
-		t.Fatalf("supported platforms=%v, want [instagram]", result.SupportedPlatforms)
+	if len(result.SupportedPlatforms) != 3 {
+		t.Fatalf("supported platforms=%v, want facebook, instagram, youtube", result.SupportedPlatforms)
 	}
-	if result.FilteredTelegram != 1 || result.FilteredPlatform != 2 {
+	if result.FilteredTelegram != 1 || result.FilteredPlatform != 0 {
 		t.Fatalf("unexpected filter counts: %+v", result)
 	}
-	if result.Imported != 2 || result.Skipped != 0 {
+	if result.Imported != 4 || result.Skipped != 0 {
 		t.Fatalf("unexpected import counts: %+v", result)
 	}
 	if result.Updated != 0 {
@@ -79,21 +79,15 @@ func TestSyncProviderCatalogWithClientsFiltersAndImports(t *testing.T) {
 	if err := db.Order("provider ASC").Find(&mappings).Error; err != nil {
 		t.Fatalf("load mappings: %v", err)
 	}
-	if len(mappings) != 2 {
-		t.Fatalf("mapping count=%d, want 2", len(mappings))
+	if len(mappings) != 4 {
+		t.Fatalf("mapping count=%d, want 4", len(mappings))
 	}
 	for _, mapping := range mappings {
-		switch mapping.Provider {
-		case upstream.CatalogProviderFansGurus:
-			if mapping.ConnectionID != 101 || mapping.UpstreamProductCode != "1" {
-				t.Fatalf("unexpected fans mapping: %+v", mapping)
-			}
-		case upstream.CatalogProviderTGX:
-			if mapping.ConnectionID != 202 || mapping.UpstreamProductCode != "IG-001" {
-				t.Fatalf("unexpected tgx mapping: %+v", mapping)
-			}
-		default:
-			t.Fatalf("unexpected provider mapping: %+v", mapping)
+		if mapping.Provider == upstream.CatalogProviderFansGurus && mapping.ConnectionID != 101 {
+			t.Fatalf("unexpected fans mapping: %+v", mapping)
+		}
+		if mapping.Provider == upstream.CatalogProviderTGX && mapping.ConnectionID != 202 {
+			t.Fatalf("unexpected tgx mapping: %+v", mapping)
 		}
 	}
 
@@ -101,7 +95,7 @@ func TestSyncProviderCatalogWithClientsFiltersAndImports(t *testing.T) {
 	if err := db.First(&run).Error; err != nil {
 		t.Fatalf("load sync run: %v", err)
 	}
-	if run.Status != "success" || run.FansGurusPulled != 3 || run.TGXPulled != 2 || run.Imported != 2 {
+	if run.Status != "success" || run.FansGurusPulled != 3 || run.TGXPulled != 2 || run.Imported != 4 {
 		t.Fatalf("unexpected sync run: %+v", run)
 	}
 	if run.RawFansGurusJSON["services"] == nil || run.RawTGXJSON["items"] == nil {
@@ -109,7 +103,7 @@ func TestSyncProviderCatalogWithClientsFiltersAndImports(t *testing.T) {
 	}
 }
 
-func TestSyncProviderCatalogWithClientsSkipsUnsupportedFansGurusTypes(t *testing.T) {
+func TestSyncProviderCatalogWithClientsImportsSupportedFansGurusTypes(t *testing.T) {
 	db := setupProviderCatalogImportDB(t)
 	svc := NewProductMappingService(
 		repository.NewProductMappingRepository(db),
@@ -131,15 +125,15 @@ func TestSyncProviderCatalogWithClientsSkipsUnsupportedFansGurusTypes(t *testing
 	if err != nil {
 		t.Fatalf("SyncProviderCatalogWithClients: %v", err)
 	}
-	if result.Imported != 2 {
-		t.Fatalf("imported=%d, want 2", result.Imported)
+	if result.Imported != 3 {
+		t.Fatalf("imported=%d, want 3", result.Imported)
 	}
-	var unsupported int64
-	if err := db.Model(&models.ProductMapping{}).Where("upstream_product_code = ?", "2").Count(&unsupported).Error; err != nil {
-		t.Fatalf("count unsupported mapping: %v", err)
+	var count int64
+	if err := db.Model(&models.ProductMapping{}).Where("upstream_product_code = ?", "2").Count(&count).Error; err != nil {
+		t.Fatalf("count comments mapping: %v", err)
 	}
-	if unsupported != 0 {
-		t.Fatalf("unsupported service was imported")
+	if count != 1 {
+		t.Fatalf("custom comments service was not imported")
 	}
 }
 

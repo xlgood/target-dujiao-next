@@ -388,12 +388,27 @@ func (s *ProcurementOrderService) submitFansGurusProcurement(ctx context.Context
 		return nil
 	}
 	req := upstream.FansGurusAddOrderRequest{
-		Service:  uint(serviceID),
-		Link:     jsonStringValue(item.ManualFormSubmissionJSON, "link"),
-		Quantity: item.Quantity,
+		Service:      uint(serviceID),
+		Link:         jsonStringValue(item.ManualFormSubmissionJSON, "link"),
+		Quantity:     item.Quantity,
+		Comments:     jsonStringValue(item.ManualFormSubmissionJSON, "comments"),
+		AnswerNumber: jsonStringValue(item.ManualFormSubmissionJSON, "answer_number"),
+		Groups:       jsonStringValue(item.ManualFormSubmissionJSON, "groups"),
+		Username:     jsonStringValue(item.ManualFormSubmissionJSON, "username"),
+		Min:          jsonPositiveIntValue(item.ManualFormSubmissionJSON, "min"),
+		Max:          jsonPositiveIntValue(item.ManualFormSubmissionJSON, "max"),
+		Posts:        jsonPositiveIntValue(item.ManualFormSubmissionJSON, "posts"),
+		OldPosts:     jsonPositiveIntValue(item.ManualFormSubmissionJSON, "old_posts"),
+		Delay:        jsonPositiveIntValue(item.ManualFormSubmissionJSON, "delay"),
+		Expiry:       jsonStringValue(item.ManualFormSubmissionJSON, "expiry"),
+		Runs:         jsonPositiveIntValue(item.ManualFormSubmissionJSON, "runs"),
+		Interval:     jsonPositiveIntValue(item.ManualFormSubmissionJSON, "interval"),
 	}
-	if req.Link == "" {
-		s.rejectProcurement(procOrder, "fansgurus link is required")
+	if req.Comments != "" || req.Username != "" {
+		req.Quantity = 0
+	}
+	if err := validateFansGurusOrderRequest(req); err != nil {
+		s.rejectProcurement(procOrder, err.Error())
 		return nil
 	}
 
@@ -427,6 +442,22 @@ func (s *ProcurementOrderService) submitFansGurusProcurement(ctx context.Context
 		_ = s.queueClient.EnqueueProcurementPollStatus(queue.ProcurementPollStatusPayload{ProcurementOrderID: procOrder.ID}, 30*time.Second)
 	}
 	return nil
+}
+
+func validateFansGurusOrderRequest(req upstream.FansGurusAddOrderRequest) error {
+	if req.Username != "" {
+		if req.Min <= 0 || req.Max <= 0 {
+			return errors.New("fansgurus subscription min and max are required")
+		}
+		return nil
+	}
+	if req.Link == "" {
+		return errors.New("fansgurus link is required")
+	}
+	if req.Comments != "" || req.AnswerNumber != "" || req.Groups != "" || req.Quantity > 0 {
+		return nil
+	}
+	return errors.New("fansgurus order data is incomplete")
 }
 
 func (s *ProcurementOrderService) submitTGXProcurement(ctx context.Context, procOrder *models.ProcurementOrder, conn *models.SiteConnection, localOrder *models.Order, item models.OrderItem, skuMapping *models.SKUMapping) error {
@@ -636,6 +667,14 @@ func jsonStringMap(values models.JSON) map[string]string {
 		}
 	}
 	return result
+}
+
+func jsonPositiveIntValue(values models.JSON, key string) int {
+	value, err := strconv.Atoi(jsonStringValue(values, key))
+	if err != nil || value <= 0 {
+		return 0
+	}
+	return value
 }
 
 func isDeliveredProviderStatus(status string) bool {

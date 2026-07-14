@@ -18,10 +18,10 @@ var (
 	tgTokenRE  = regexp.MustCompile(`(?i)(^|[^a-z0-9])tg([^a-z0-9]|$)`)
 	facelookRE = regexp.MustCompile(`(?i)\bfacelook\b`)
 
-	platformOrder           = []string{"instagram", "tiktok", "facebook", "youtube", "x"}
-	unsupportedTitleAliases = []string{
-		"gmail", "google mail", "google account", "outlook", "hotmail", "yahoo mail",
-		"discord", "linkedin", "reddit", "threads", "apple id", "chatgpt",
+	platformOrder = []string{
+		"x", "instagram", "facebook", "tiktok", "youtube", "vk", "spotify",
+		"discord", "twitch", "reddit", "linkedin", "github", "quora", "whatsapp",
+		"line-voom", "threads", "gmail", "outlook", "hotmail", "overseas-email",
 	}
 
 	platformAliases = map[string][]string{
@@ -50,6 +50,21 @@ var (
 			"you tube",
 			"yt",
 		},
+		"vk":             {"vkontakte", "vk"},
+		"spotify":        {"spotify"},
+		"discord":        {"discord"},
+		"twitch":         {"twitch"},
+		"reddit":         {"reddit"},
+		"linkedin":       {"linkedin", "linked in"},
+		"github":         {"github", "git hub"},
+		"quora":          {"quora"},
+		"whatsapp":       {"whatsapp", "whats app"},
+		"line-voom":      {"line voom", "linevoom"},
+		"threads":        {"threads"},
+		"gmail":          {"gmail", "google mail", "google account"},
+		"outlook":        {"outlook"},
+		"hotmail":        {"hotmail"},
+		"overseas-email": {"overseas email", "email account", "email", "mailbox"},
 		"telegram": {
 			"telegram",
 			"电报",
@@ -58,6 +73,15 @@ var (
 			"t.me",
 		},
 	}
+
+	fansGurusAllowedPlatforms = platformSetFromNames([]string{
+		"x", "instagram", "facebook", "tiktok", "youtube", "vk", "spotify", "discord",
+		"twitch", "reddit", "linkedin", "github", "quora", "whatsapp", "line-voom", "threads",
+	})
+	tgxAllowedPlatforms = platformSetFromNames([]string{
+		"x", "facebook", "instagram", "youtube", "tiktok", "gmail", "threads", "linkedin",
+		"github", "reddit", "discord", "outlook", "hotmail", "overseas-email",
+	})
 )
 
 type ProviderCatalogItem struct {
@@ -100,18 +124,16 @@ type FilteredCatalog struct {
 }
 
 func NewFansGurusCatalogItem(service FansGurusService) (ProviderCatalogItem, error) {
-	targetRate, err := FansGurusTargetRate(service.Rate)
-	if err != nil {
-		return ProviderCatalogItem{}, err
-	}
 	return ProviderCatalogItem{
-		Provider:           CatalogProviderFansGurus,
-		Code:               uintToString(service.Service),
-		Name:               service.Name,
-		Category:           service.Category,
-		Type:               service.Type,
-		UpstreamPrice:      service.Rate,
-		TargetPrice:        targetRate,
+		Provider:      CatalogProviderFansGurus,
+		Code:          uintToString(service.Service),
+		Name:          service.Name,
+		Category:      service.Category,
+		Type:          service.Type,
+		UpstreamPrice: service.Rate,
+		// The connection's configurable exchange/markup settings determine the
+		// local sale price during import. Keep the upstream amount unchanged here.
+		TargetPrice:        service.Rate,
 		PriceQuantityBasis: 1000,
 		MinQuantity:        service.Min,
 		MaxQuantity:        service.Max,
@@ -124,7 +146,12 @@ func NewFansGurusCatalogItem(service FansGurusService) (ProviderCatalogItem, err
 // Other service types require additional user input and must not be sold yet.
 func FansGurusServiceTypeSupported(serviceType string) bool {
 	normalized := strings.ToLower(strings.TrimSpace(serviceType))
-	return normalized == "" || normalized == "default"
+	switch normalized {
+	case "", "default", "custom comments", "poll", "invites from groups", "subscriptions":
+		return true
+	default:
+		return false
+	}
 }
 
 func NewTGXCatalogItem(commodity TGXCommodity) (ProviderCatalogItem, error) {
@@ -197,15 +224,18 @@ func BuildFilteredCatalog(fansGurus, tgx []ProviderCatalogItem) FilteredCatalog 
 	tgxClean, tgxTelegram := filterTelegramItems(tgx)
 	fansActive, fansInactive := filterActiveItems(fansClean)
 	tgxActive, tgxInactive := filterActiveItems(tgxClean)
-	supported := intersectPlatforms(platformSet(fansActive), platformSet(tgxActive))
+	fansAllowed, fansFiltered := filterAllowedPlatforms(fansActive, fansGurusAllowedPlatforms)
+	tgxAllowed, tgxFiltered := filterAllowedPlatforms(tgxActive, tgxAllowedPlatforms)
 
 	result := FilteredCatalog{
-		SupportedPlatforms: supported,
+		SupportedPlatforms: append(platformNames(fansAllowed), platformNames(tgxAllowed)...),
 		FilteredTelegram:   append(fansTelegram, tgxTelegram...),
 		FilteredInactive:   append(fansInactive, tgxInactive...),
+		FilteredPlatform:   append(fansFiltered, tgxFiltered...),
 	}
-	result.FansGurus, result.FilteredPlatform = filterSupportedPlatforms(fansActive, supported, result.FilteredPlatform)
-	result.TGX, result.FilteredPlatform = filterSupportedPlatforms(tgxActive, supported, result.FilteredPlatform)
+	result.SupportedPlatforms = uniqueSortedStrings(result.SupportedPlatforms)
+	result.FansGurus = fansAllowed
+	result.TGX = tgxAllowed
 	return result
 }
 
@@ -244,74 +274,14 @@ func ContainsTelegramCatalogText(parts ...string) bool {
 }
 
 func (i ProviderCatalogItem) Platform() string {
-	// Email accounts are outside the initial social-platform catalog. Treating a
-	// Gmail account as a YouTube product because it mentions YT is unsafe.
-	if catalogTextContainsAlias(normalizeCatalogText(i.Name), "gmail") {
-		return ""
-	}
-	if unsupportedPlatformPrecedesSupportedPlatform(i.Name) {
-		return ""
-	}
 	if platform := NormalizePlatform(i.Name); platform != "" {
 		return platform
-	}
-	if containsUnsupportedPlatformTitle(i.Name) {
-		return ""
 	}
 	return NormalizePlatform(i.Category)
 }
 
-func unsupportedPlatformPrecedesSupportedPlatform(title string) bool {
-	text := normalizeCatalogText(title)
-	unsupportedIndex := firstCatalogAliasIndex(text, unsupportedTitleAliases)
-	if unsupportedIndex < 0 {
-		return false
-	}
-	supportedIndex := -1
-	for _, aliases := range platformAliases {
-		index := firstCatalogAliasIndex(text, aliases)
-		if index >= 0 && (supportedIndex < 0 || index < supportedIndex) {
-			supportedIndex = index
-		}
-	}
-	return supportedIndex < 0 || unsupportedIndex <= supportedIndex
-}
-
-func firstCatalogAliasIndex(text string, aliases []string) int {
-	first := -1
-	for _, alias := range aliases {
-		alias = normalizeCatalogText(alias)
-		if alias == "" {
-			continue
-		}
-		index := -1
-		if len(alias) <= 2 && isASCIIAlphaNum(alias) {
-			pattern := regexp.MustCompile(`(^|[^a-z0-9])` + regexp.QuoteMeta(alias) + `([^a-z0-9]|$)`)
-			if match := pattern.FindStringIndex(text); match != nil {
-				index = match[0]
-			}
-		} else {
-			index = strings.Index(text, alias)
-		}
-		if index >= 0 && (first < 0 || index < first) {
-			first = index
-		}
-	}
-	return first
-}
-
 func normalizeProviderTitle(title string) string {
 	return facelookRE.ReplaceAllString(strings.TrimSpace(title), "Facebook")
-}
-
-func containsUnsupportedPlatformTitle(title string) bool {
-	text := normalizeCatalogText(title)
-	for _, alias := range unsupportedTitleAliases {
-		if catalogTextContainsAlias(text, alias) {
-			return true
-		}
-	}
-	return false
 }
 
 func (i ProviderCatalogItem) ContainsTelegram() bool {
@@ -347,41 +317,48 @@ func filterActiveItems(items []ProviderCatalogItem) ([]ProviderCatalogItem, []Pr
 	return kept, filtered
 }
 
-func platformSet(items []ProviderCatalogItem) map[string]struct{} {
-	set := make(map[string]struct{})
-	for _, item := range items {
-		if platform := item.Platform(); platform != "" {
-			set[platform] = struct{}{}
-		}
-	}
-	return set
-}
-
-func intersectPlatforms(left, right map[string]struct{}) []string {
-	result := make([]string, 0)
-	for platform := range left {
-		if _, ok := right[platform]; ok {
-			result = append(result, platform)
-		}
-	}
-	sort.Strings(result)
-	return result
-}
-
-func filterSupportedPlatforms(items []ProviderCatalogItem, supported []string, filtered []ProviderCatalogItem) ([]ProviderCatalogItem, []ProviderCatalogItem) {
-	supportedSet := make(map[string]struct{}, len(supported))
-	for _, platform := range supported {
-		supportedSet[platform] = struct{}{}
-	}
+func filterAllowedPlatforms(items []ProviderCatalogItem, allowed map[string]struct{}) ([]ProviderCatalogItem, []ProviderCatalogItem) {
 	kept := make([]ProviderCatalogItem, 0, len(items))
+	filtered := make([]ProviderCatalogItem, 0)
 	for _, item := range items {
-		if _, ok := supportedSet[item.Platform()]; ok {
+		if _, ok := allowed[item.Platform()]; ok {
 			kept = append(kept, item)
 			continue
 		}
 		filtered = append(filtered, item)
 	}
 	return kept, filtered
+}
+
+func platformSetFromNames(names []string) map[string]struct{} {
+	result := make(map[string]struct{}, len(names))
+	for _, name := range names {
+		result[name] = struct{}{}
+	}
+	return result
+}
+
+func platformNames(items []ProviderCatalogItem) []string {
+	result := make([]string, 0, len(items))
+	for _, item := range items {
+		if platform := item.Platform(); platform != "" {
+			result = append(result, platform)
+		}
+	}
+	return result
+}
+
+func uniqueSortedStrings(values []string) []string {
+	set := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		set[value] = struct{}{}
+	}
+	result := make([]string, 0, len(set))
+	for value := range set {
+		result = append(result, value)
+	}
+	sort.Strings(result)
+	return result
 }
 
 func catalogTextContainsAlias(text, alias string) bool {

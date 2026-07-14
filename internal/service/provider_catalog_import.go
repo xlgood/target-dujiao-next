@@ -76,11 +76,9 @@ func (s *ProductMappingService) importProviderCatalogItem(connectionID uint, ite
 	if err != nil {
 		return false, false, err
 	}
-	if imagePath := models.ProviderCatalogImagePath(platform); imagePath != "" {
-		item.Images = []string{imagePath}
-	} else {
-		item.Images = nil
-	}
+	// Catalog images are shared by platform. Do not download thousands of
+	// upstream covers; operations can replace each local platform asset once.
+	item.Images = []string{models.ProviderCatalogImagePath(platform)}
 	price, cost, err := providerCatalogAmounts(item.Provider, item.UpstreamPrice, item.TargetPrice, conn)
 	if err != nil {
 		return false, false, fmt.Errorf("calculate catalog price for %s:%s: %w", item.Provider, item.Code, err)
@@ -213,7 +211,9 @@ func (s *ProductMappingService) refreshProviderCatalogItemInTx(tx *gorm.DB, mapp
 	product.TitleJSON = localizedText(item.Name)
 	product.DescriptionJSON = localizedText(item.Description)
 	product.ContentJSON = localizedText(item.Description)
-	product.PriceAmount = models.NewMoneyFromDecimal(price)
+	if conn == nil || conn.AutoSyncPrice {
+		product.PriceAmount = models.NewMoneyFromDecimal(price)
+	}
 	product.PriceQuantityBasis = providerCatalogPriceQuantityBasis(item)
 	product.CostPriceAmount = models.NewMoneyFromDecimal(cost)
 	product.MinPurchaseQuantity = item.MinQuantity
@@ -258,7 +258,9 @@ func (s *ProductMappingService) refreshProviderVariantSKU(productSKURepo reposit
 	if err != nil {
 		return err
 	}
-	sku.PriceAmount = models.NewMoneyFromDecimal(price)
+	if conn == nil || conn.AutoSyncPrice {
+		sku.PriceAmount = models.NewMoneyFromDecimal(price)
+	}
 	sku.PriceQuantityBasis = providerCatalogPriceQuantityBasis(item)
 	sku.CostPriceAmount = models.NewMoneyFromDecimal(cost)
 	sku.SpecValuesJSON = providerVariantSpecValues(item.Provider, platform, variant)
@@ -333,7 +335,7 @@ func providerCatalogStockSyncedAt(provider string, stock int, now time.Time) *ti
 }
 
 func (s *ProductMappingService) providerCatalogConnection(connectionID uint, provider string) (*models.SiteConnection, error) {
-	if provider != upstream.CatalogProviderTGX || s.connService == nil {
+	if s.connService == nil {
 		return nil, nil
 	}
 	conn, err := s.connService.GetByID(connectionID)
@@ -346,39 +348,21 @@ func (s *ProductMappingService) providerCatalogConnection(connectionID uint, pro
 	return conn, nil
 }
 
-// providerCatalogAmounts returns local USD sale and cost amounts. FansGurus
-// quotes USD directly; TGX quotes CNY and must be converted via its connection.
+// providerCatalogAmounts returns local sale and cost amounts from the connection
+// configuration. FansGurus uses exchange rate 1; TGX must use its CNY-to-USD rate.
 func providerCatalogAmounts(provider, upstreamRaw, fallbackTarget string, conn *models.SiteConnection) (decimal.Decimal, decimal.Decimal, error) {
 	upstreamPrice := parseProviderUpstreamPrice(upstreamRaw)
-	switch provider {
-	case upstream.CatalogProviderFansGurus:
-		local, err := decimal.NewFromString(fallbackTarget)
-		if err != nil {
-			return decimal.Zero, decimal.Zero, err
-		}
-		return local, upstreamPrice, nil
-	case upstream.CatalogProviderTGX:
-		if conn == nil {
-			// Keep the pure import helper backward-compatible for callers that do
-			// not have a persisted connection. Production catalog sync always
-			// supplies the TGX connection and therefore never uses this branch.
-			local, err := decimal.NewFromString(fallbackTarget)
-			if err != nil {
-				return decimal.Zero, decimal.Zero, err
-			}
-			return local, upstreamPrice, nil
-		}
-		if conn.ExchangeRate.LessThanOrEqual(decimal.Zero) || conn.ExchangeRate.GreaterThanOrEqual(decimal.NewFromInt(1)) {
-			return decimal.Zero, decimal.Zero, fmt.Errorf("TGX CNY-to-USD exchange rate must be greater than 0 and less than 1")
-		}
-		return CalculateLocalPrice(upstreamPrice, conn.ExchangeRate, conn.PriceMarkupPercent, conn.PriceRoundingMode), convertCurrency(upstreamPrice, conn.ExchangeRate).Round(2), nil
-	default:
+	if conn == nil {
 		local, err := decimal.NewFromString(fallbackTarget)
 		if err != nil {
 			return decimal.Zero, decimal.Zero, err
 		}
 		return local, upstreamPrice, nil
 	}
+	if provider == upstream.CatalogProviderTGX && (conn.ExchangeRate.LessThanOrEqual(decimal.Zero) || conn.ExchangeRate.GreaterThanOrEqual(decimal.NewFromInt(1))) {
+		return decimal.Zero, decimal.Zero, fmt.Errorf("TGX CNY-to-USD exchange rate must be greater than 0 and less than 1")
+	}
+	return CalculateLocalPrice(upstreamPrice, conn.ExchangeRate, conn.PriceMarkupPercent, conn.PriceRoundingMode), convertCurrency(upstreamPrice, conn.ExchangeRate).Round(2), nil
 }
 
 func parseProviderUpstreamPrice(raw string) decimal.Decimal {
@@ -452,6 +436,41 @@ func providerManualFormSchema(provider string) models.JSON {
 func providerCatalogManualFormSchema(item upstream.ProviderCatalogItem) models.JSON {
 	if len(item.ManualSchema) > 0 {
 		return models.JSON(item.ManualSchema)
+	}
+	if item.Provider == upstream.CatalogProviderFansGurus {
+		switch strings.ToLower(strings.TrimSpace(item.Type)) {
+		case "custom comments":
+			return models.JSON{"fields": []map[string]interface{}{
+				{"key": "link", "type": "url", "label": "Target URL", "required": true},
+				{"key": "comments", "type": "textarea", "label": "Comments", "required": true},
+			}}
+		case "poll":
+			return models.JSON{"fields": []map[string]interface{}{
+				{"key": "link", "type": "url", "label": "Target URL", "required": true},
+				{"key": "answer_number", "type": "number", "label": "Answer number", "required": true},
+			}}
+		case "invites from groups":
+			return models.JSON{"fields": []map[string]interface{}{
+				{"key": "link", "type": "url", "label": "Target URL", "required": true},
+				{"key": "groups", "type": "textarea", "label": "Groups", "required": true},
+			}}
+		case "subscriptions":
+			return models.JSON{"fields": []map[string]interface{}{
+				{"key": "username", "type": "text", "label": "Username", "required": true},
+				{"key": "min", "type": "number", "label": "Minimum quantity", "required": true},
+				{"key": "max", "type": "number", "label": "Maximum quantity", "required": true},
+				{"key": "posts", "type": "number", "label": "Posts", "required": false},
+				{"key": "old_posts", "type": "number", "label": "Old posts", "required": false},
+				{"key": "delay", "type": "number", "label": "Delay", "required": false},
+				{"key": "expiry", "type": "text", "label": "Expiry", "required": false},
+			}}
+		case "", "default":
+			return models.JSON{"fields": []map[string]interface{}{
+				{"key": "link", "type": "url", "label": "Target URL", "required": true},
+				{"key": "runs", "type": "number", "label": "Runs", "required": false},
+				{"key": "interval", "type": "number", "label": "Interval (minutes)", "required": false},
+			}}
+		}
 	}
 	return providerManualFormSchema(item.Provider)
 }

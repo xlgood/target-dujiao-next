@@ -476,14 +476,6 @@ func (c *TGXClient) QueryTrade(ctx context.Context, tradeNo string) (*TGXQueryRe
 	return &result, nil
 }
 
-func TGXTargetPrice(price string) (string, error) {
-	amount, err := decimal.NewFromString(strings.TrimSpace(price))
-	if err != nil {
-		return "", fmt.Errorf("parse tgx price: %w", err)
-	}
-	return amount.Mul(decimal.RequireFromString("1.2")).StringFixedBank(8), nil
-}
-
 func (c *TGXClient) postForm(ctx context.Context, path string, values url.Values, result interface{}) error {
 	values = cloneURLValues(values)
 	values.Set("app_id", c.appID)

@@ -256,16 +256,6 @@ func TestTGXClientInventoryStateMapsDocumentedInsufficientStock(t *testing.T) {
 	}
 }
 
-func TestTGXTargetPrice(t *testing.T) {
-	got, err := TGXTargetPrice("100.00")
-	if err != nil {
-		t.Fatalf("TGXTargetPrice: %v", err)
-	}
-	if got != "120.00000000" {
-		t.Fatalf("target price=%s, want 120.00000000", got)
-	}
-}
-
 func TestTGXClientRedactsAppKeyInErrors(t *testing.T) {
 	server := newTGXTestServer(t, func(r *http.Request) interface{} {
 		return map[string]string{"code": "401", "msg": "invalid app key app-secret"}

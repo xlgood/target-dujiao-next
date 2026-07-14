@@ -99,9 +99,8 @@ func ensureTGXUnknownStockMigration() error {
 	})
 }
 
-// ensureProviderCatalogImageMigration replaces upstream product covers with a
-// small fixed set of local category images. This prevents hotlink failures and
-// keeps catalog storage bounded regardless of SKU count.
+// ensureProviderCatalogImageMigration replaces provider covers with a single
+// local platform image. This avoids hotlinking and prevents one file per SKU.
 func ensureProviderCatalogImageMigration() error {
 	if DB == nil {
 		return errors.New("database is not initialized")
@@ -122,9 +121,6 @@ func ensureProviderCatalogImageMigration() error {
 		}
 		for _, mapping := range mappings {
 			imagePath := ProviderCatalogImagePath(mapping.Platform)
-			if imagePath == "" {
-				continue
-			}
 			if err := tx.Model(&Product{}).Where("id = ?", mapping.LocalProductID).
 				Update("images", StringArray{imagePath}).Error; err != nil {
 				return err

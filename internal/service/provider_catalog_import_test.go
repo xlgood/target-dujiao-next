@@ -73,24 +73,24 @@ func TestImportProviderCatalogCreatesProductsAndMappings(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ImportProviderCatalog: %v", err)
 	}
-	if result.Imported != 2 || result.Skipped != 0 {
-		t.Fatalf("result=%+v, want imported=2 skipped=0", result)
+	if result.Imported != 3 || result.Skipped != 0 {
+		t.Fatalf("result=%+v, want imported=3 skipped=0", result)
 	}
 
 	var categories []models.Category
 	if err := db.Find(&categories).Error; err != nil {
 		t.Fatalf("load categories: %v", err)
 	}
-	if len(categories) != 1 || categories[0].Slug != "platform-instagram" {
-		t.Fatalf("categories=%+v, want only platform-instagram", categories)
+	if len(categories) != 2 {
+		t.Fatalf("categories=%+v, want facebook and instagram", categories)
 	}
 
 	var products []models.Product
 	if err := db.Preload("SKUs").Order("slug ASC").Find(&products).Error; err != nil {
 		t.Fatalf("load products: %v", err)
 	}
-	if len(products) != 2 {
-		t.Fatalf("product count=%d, want 2", len(products))
+	if len(products) != 3 {
+		t.Fatalf("product count=%d, want 3", len(products))
 	}
 	for _, product := range products {
 		if product.FulfillmentType != constants.FulfillmentTypeUpstream || !product.IsMapped || product.IsActive {
@@ -128,15 +128,15 @@ func TestImportProviderCatalogCreatesProductsAndMappings(t *testing.T) {
 	if err := db.Order("upstream_sku_code ASC").Find(&skuMappings).Error; err != nil {
 		t.Fatalf("load sku mappings: %v", err)
 	}
-	if len(skuMappings) != 2 {
-		t.Fatalf("sku mapping count=%d, want 2", len(skuMappings))
+	if len(skuMappings) != 3 {
+		t.Fatalf("sku mapping count=%d, want 3", len(skuMappings))
 	}
 	if skuMappings[0].UpstreamSKUCode == "" || skuMappings[1].UpstreamSKUCode == "" {
 		t.Fatalf("sku mappings should keep upstream sku codes: %+v", skuMappings)
 	}
 }
 
-func TestImportProviderCatalogUsesSharedCategoryImage(t *testing.T) {
+func TestImportProviderCatalogUsesSharedPlatformImage(t *testing.T) {
 	db := setupProviderCatalogImportDB(t)
 	svc := NewProductMappingService(
 		repository.NewProductMappingRepository(db),
@@ -166,7 +166,7 @@ func TestImportProviderCatalogUsesSharedCategoryImage(t *testing.T) {
 		t.Fatalf("load product: %v", err)
 	}
 	if len(product.Images) != 1 || product.Images[0] != "/uploads/catalog/facebook.svg" {
-		t.Fatalf("images=%v, want shared Facebook cover", product.Images)
+		t.Fatalf("images=%v, want shared Facebook image", product.Images)
 	}
 }
 
