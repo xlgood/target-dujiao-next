@@ -271,6 +271,53 @@ func TestImportProviderCatalogCreatesTGXRaceSKUsAndWidgetSchema(t *testing.T) {
 	}
 }
 
+func TestImportProviderCatalogRefreshPreservesTGXRealTimeStock(t *testing.T) {
+	db := setupProviderCatalogImportDB(t)
+	svc := NewProductMappingService(
+		repository.NewProductMappingRepository(db),
+		repository.NewSKUMappingRepository(db),
+		repository.NewProductRepository(db),
+		repository.NewProductSKURepository(db),
+		repository.NewCategoryRepository(db),
+		nil,
+	)
+
+	item, err := upstream.NewTGXCatalogItem(upstream.TGXCommodity{
+		Code: "IG-001", Name: "Instagram Account", Category: "Instagram", Price: "100.00",
+	})
+	if err != nil {
+		t.Fatalf("NewTGXCatalogItem: %v", err)
+	}
+	catalog := upstream.FilteredCatalog{TGX: []upstream.ProviderCatalogItem{item}}
+	if _, err := svc.ImportProviderCatalog(10, catalog); err != nil {
+		t.Fatalf("first import: %v", err)
+	}
+
+	var mapping models.ProductMapping
+	if err := db.Where("upstream_product_code = ?", "IG-001").First(&mapping).Error; err != nil {
+		t.Fatalf("load mapping: %v", err)
+	}
+	var skuMapping models.SKUMapping
+	if err := db.Where("product_mapping_id = ?", mapping.ID).First(&skuMapping).Error; err != nil {
+		t.Fatalf("load SKU mapping: %v", err)
+	}
+	if err := db.Model(&models.SKUMapping{}).Where("id = ?", skuMapping.ID).Updates(map[string]interface{}{
+		"upstream_stock": 27, "upstream_is_active": true,
+	}).Error; err != nil {
+		t.Fatalf("store real-time stock: %v", err)
+	}
+
+	if _, err := svc.ImportProviderCatalog(10, catalog); err != nil {
+		t.Fatalf("second import: %v", err)
+	}
+	if err := db.First(&skuMapping, skuMapping.ID).Error; err != nil {
+		t.Fatalf("reload SKU mapping: %v", err)
+	}
+	if skuMapping.UpstreamStock != 27 || !skuMapping.UpstreamIsActive {
+		t.Fatalf("catalog refresh overwrote real-time TGX stock: %+v", skuMapping)
+	}
+}
+
 func setupProviderCatalogImportDB(t *testing.T) *gorm.DB {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open("file:"+normalizeProviderSlug(t.Name())+"?mode=memory&cache=shared"), &gorm.Config{})

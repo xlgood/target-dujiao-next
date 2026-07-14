@@ -514,23 +514,21 @@ func (h *Handler) applyUpstreamDisplayTypes(products []models.Product) {
 		for j := range p.SKUs {
 			sku := &p.SKUs[j]
 			sm, found := skuMappingByLocal[sku.ID]
-			if !found || !sm.UpstreamIsActive {
+			if !found {
 				continue
 			}
 
-			if sm.UpstreamStock == -1 {
+			if sm.UpstreamIsActive && sm.UpstreamStock == -1 {
 				hasUnlimited = true
 			} else {
-				totalStock += int64(sm.UpstreamStock)
+				totalStock += int64(max(sm.UpstreamStock, 0))
 			}
 
 			if displayType == constants.FulfillmentTypeAuto {
-				sku.AutoStockAvailable = int64(sm.UpstreamStock)
-				if sm.UpstreamStock > 0 {
-					sku.AutoStockTotal = int64(sm.UpstreamStock)
-				}
+				sku.AutoStockAvailable = int64(max(sm.UpstreamStock, 0))
+				sku.AutoStockTotal = int64(max(sm.UpstreamStock, 0))
 			} else {
-				sku.ManualStockTotal = sm.UpstreamStock
+				sku.ManualStockTotal = max(sm.UpstreamStock, 0)
 			}
 		}
 

@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"crypto/sha1"
 	"encoding/hex"
 	"errors"
@@ -76,6 +77,13 @@ func (s *ProductMappingService) importProviderCatalogItem(connectionID uint, ite
 	if err != nil {
 		return false, false, err
 	}
+	if existing, lookupErr := s.mappingRepo.GetByConnectionAndUpstreamCode(connectionID, item.Code); lookupErr == nil && existing != nil {
+		if existingProduct, getErr := s.productRepo.GetByID(strconv.FormatUint(uint64(existing.LocalProductID), 10)); getErr == nil && existingProduct != nil {
+			item.Images = s.localizeProviderCatalogImages(item, conn, existingProduct.Images)
+		}
+	} else {
+		item.Images = s.localizeProviderCatalogImages(item, conn, nil)
+	}
 	price, cost, err := providerCatalogAmounts(item.Provider, item.UpstreamPrice, item.TargetPrice, conn)
 	if err != nil {
 		return false, false, fmt.Errorf("calculate catalog price for %s:%s: %w", item.Provider, item.Code, err)
@@ -99,6 +107,31 @@ func (s *ProductMappingService) importProviderCatalogItem(connectionID uint, ite
 		return false, false, err
 	}
 	return created, updated, nil
+}
+
+func (s *ProductMappingService) localizeProviderCatalogImages(item upstream.ProviderCatalogItem, conn *models.SiteConnection, existing models.StringArray) []string {
+	if item.Provider != upstream.CatalogProviderTGX || conn == nil || len(item.Images) == 0 {
+		return item.Images
+	}
+	if len(existing) > 0 && strings.HasPrefix(strings.TrimSpace(existing[0]), "/uploads/") {
+		return []string(existing)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	client := upstream.NewTGXClient(conn.BaseURL, conn.ApiKey, "")
+	localized := make([]string, 0, len(item.Images))
+	for _, imageURL := range item.Images {
+		localPath, err := client.DownloadImage(ctx, imageURL, "uploads")
+		if err != nil {
+			localized = append(localized, imageURL)
+			continue
+		}
+		if s.mediaService != nil {
+			s.mediaService.RecordLocalFile(localPath, "upstream")
+		}
+		localized = append(localized, localPath)
+	}
+	return localized
 }
 
 func (s *ProductMappingService) importProviderCatalogItemInTx(tx *gorm.DB, connectionID uint, item upstream.ProviderCatalogItem, platform string, price decimal.Decimal, cost decimal.Decimal, conn *models.SiteConnection, imported *bool) error {
@@ -221,7 +254,6 @@ func (s *ProductMappingService) refreshProviderCatalogItemInTx(tx *gorm.DB, mapp
 	if err := productRepo.Update(product); err != nil {
 		return err
 	}
-
 	variants := item.Variants
 	if len(variants) == 0 {
 		variants = []upstream.ProviderCatalogVariant{{Code: item.Code, Name: "default", UpstreamPrice: item.UpstreamPrice, TargetPrice: item.TargetPrice, Stock: -1, Active: true}}
@@ -262,9 +294,12 @@ func (s *ProductMappingService) refreshProviderVariantSKU(productSKURepo reposit
 		return err
 	}
 	skuMapping.UpstreamPrice = models.NewMoneyFromDecimal(parseProviderUpstreamPrice(variant.UpstreamPrice))
-	skuMapping.UpstreamStock = variant.Stock
-	skuMapping.UpstreamIsActive = variant.Active
-	skuMapping.StockSyncedAt = &now
+	skuMapping.UpstreamSKUCode = variant.Code
+	if variant.Stock >= 0 {
+		skuMapping.UpstreamStock = variant.Stock
+		skuMapping.UpstreamIsActive = variant.Active
+		skuMapping.StockSyncedAt = &now
+	}
 	return skuMappingRepo.Update(skuMapping)
 }
 

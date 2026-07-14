@@ -6,12 +6,16 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/shopspring/decimal"
 )
 
@@ -331,6 +335,7 @@ func (c *TGXClient) ListItems(ctx context.Context) (*TGXItemsResponse, error) {
 	if err := c.postForm(ctx, "/commodity/items", nil, &result); err != nil {
 		return nil, err
 	}
+	c.normalizeCommodityCovers(result.Items)
 	return &result, nil
 }
 
@@ -340,7 +345,81 @@ func (c *TGXClient) GetItem(ctx context.Context, sharedCode string) (*TGXCommodi
 	if err := c.postForm(ctx, "/commodity/item", values, &result); err != nil {
 		return nil, err
 	}
+	result.Cover = c.resolvePublicURL(result.Cover)
 	return &result, nil
+}
+
+func (c *TGXClient) normalizeCommodityCovers(items []TGXCommodity) {
+	for i := range items {
+		items[i].Cover = c.resolvePublicURL(items[i].Cover)
+	}
+}
+
+func (c *TGXClient) resolvePublicURL(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	assetURL, err := url.Parse(raw)
+	if err != nil || assetURL.IsAbs() {
+		return raw
+	}
+	baseURL, err := url.Parse(c.baseURL)
+	if err != nil {
+		return raw
+	}
+	return baseURL.ResolveReference(assetURL).String()
+}
+
+// DownloadImage stores a TGX cover locally so storefront rendering does not
+// depend on the upstream server's referrer or hotlink rules.
+func (c *TGXClient) DownloadImage(ctx context.Context, rawURL, uploadsDir string) (string, error) {
+	imageURL := c.resolvePublicURL(rawURL)
+	if imageURL == "" {
+		return "", fmt.Errorf("tgx image URL is empty")
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, imageURL, nil)
+	if err != nil {
+		return "", fmt.Errorf("create TGX image request: %w", err)
+	}
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("download TGX image: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("download TGX image: status %d", resp.StatusCode)
+	}
+	contentType := strings.ToLower(strings.TrimSpace(strings.Split(resp.Header.Get("Content-Type"), ";")[0]))
+	if !strings.HasPrefix(contentType, "image/") {
+		return "", fmt.Errorf("download TGX image: unexpected content type %q", contentType)
+	}
+
+	parsed, _ := url.Parse(imageURL)
+	ext := strings.ToLower(filepath.Ext(parsed.Path))
+	if ext == "" || len(ext) > 6 || mime.TypeByExtension(ext) == "" {
+		extensions, _ := mime.ExtensionsByType(contentType)
+		if len(extensions) > 0 {
+			ext = extensions[0]
+		} else {
+			ext = ".img"
+		}
+	}
+	dir := filepath.Join(uploadsDir, "upstream")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", fmt.Errorf("create TGX image directory: %w", err)
+	}
+	filename := uuid.NewString() + ext
+	path := filepath.Join(dir, filename)
+	file, err := os.Create(path)
+	if err != nil {
+		return "", fmt.Errorf("create TGX image file: %w", err)
+	}
+	defer file.Close()
+	if _, err := io.Copy(file, io.LimitReader(resp.Body, 10<<20)); err != nil {
+		return "", fmt.Errorf("write TGX image: %w", err)
+	}
+	return "/uploads/upstream/" + filename, nil
 }
 
 func (c *TGXClient) GetInventory(ctx context.Context, sharedCode, race string) (*TGXInventoryResponse, error) {
