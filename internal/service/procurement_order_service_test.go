@@ -1007,6 +1007,81 @@ func TestSubmitToUpstream_FansGurusProvider(t *testing.T) {
 	}
 }
 
+func TestSubmitToUpstream_FansGurusAllSupportedServiceTypes(t *testing.T) {
+	cases := []struct {
+		name       string
+		submission models.JSON
+		assertForm func(*testing.T, *http.Request)
+	}{
+		{"default", models.JSON{"link": "https://example.com/post"}, func(t *testing.T, r *http.Request) {
+			if r.FormValue("link") != "https://example.com/post" || r.FormValue("quantity") != "1" {
+				t.Fatalf("default form=%v", r.Form)
+			}
+		}},
+		{"custom_comments", models.JSON{"link": "https://example.com/post", "comments": "first\nsecond"}, func(t *testing.T, r *http.Request) {
+			if r.FormValue("comments") != "first\nsecond" || r.FormValue("quantity") != "" {
+				t.Fatalf("comments form=%v", r.Form)
+			}
+		}},
+		{"poll", models.JSON{"link": "https://example.com/poll", "answer_number": "2"}, func(t *testing.T, r *http.Request) {
+			if r.FormValue("answer_number") != "2" || r.FormValue("quantity") != "1" {
+				t.Fatalf("poll form=%v", r.Form)
+			}
+		}},
+		{"invites_from_groups", models.JSON{"link": "https://example.com/group", "groups": "group-a\ngroup-b"}, func(t *testing.T, r *http.Request) {
+			if r.FormValue("groups") != "group-a\ngroup-b" || r.FormValue("quantity") != "1" {
+				t.Fatalf("groups form=%v", r.Form)
+			}
+		}},
+		{"subscriptions", models.JSON{"username": "target_user", "min": 10, "max": 30, "posts": 5, "old_posts": 1, "delay": 60, "expiry": "2027-01-01"}, func(t *testing.T, r *http.Request) {
+			if r.FormValue("username") != "target_user" || r.FormValue("min") != "10" || r.FormValue("max") != "30" || r.FormValue("quantity") != "" {
+				t.Fatalf("subscription form=%v", r.Form)
+			}
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			db := setupProcurementTestDB(t)
+			order := createProcTestOrder(t, db, "PROC-FG-"+tc.name, constants.OrderStatusPaid, constants.FulfillmentTypeUpstream)
+			setProcTestManualSubmission(t, db, order.ID, tc.submission)
+			mapping := &models.ProductMapping{LocalProductID: 1, UpstreamProductCode: "12345", Provider: upstream.CatalogProviderFansGurus, IsActive: true}
+			if err := db.Create(mapping).Error; err != nil {
+				t.Fatal(err)
+			}
+			if err := db.Create(&models.SKUMapping{ProductMappingID: mapping.ID, LocalSKUID: 1, UpstreamSKUCode: "12345", UpstreamIsActive: true}).Error; err != nil {
+				t.Fatal(err)
+			}
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if err := r.ParseForm(); err != nil {
+					t.Fatal(err)
+				}
+				if r.FormValue("action") != "add" || r.FormValue("service") != "12345" {
+					t.Fatalf("base form=%v", r.Form)
+				}
+				tc.assertForm(t, r)
+				_ = json.NewEncoder(w).Encode(map[string]any{"order": 9988, "charge": "0.50"})
+			}))
+			defer server.Close()
+			connSvc := NewSiteConnectionService(repository.NewSiteConnectionRepository(db), "test-key", t.TempDir())
+			conn, err := connSvc.Create(CreateConnectionInput{Name: "fansgurus", BaseURL: server.URL, ApiKey: "fans-key", ApiSecret: "unused", Protocol: constants.ConnectionProtocolFansGurus})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := db.Model(mapping).Update("connection_id", conn.ID).Error; err != nil {
+				t.Fatal(err)
+			}
+			proc := createTestProcurementOrder(t, db, conn.ID, order.ID, order.OrderNo, constants.ProcurementStatusPending)
+			if err := newTestProcurementService(db, connSvc).SubmitToUpstream(proc.ID); err != nil {
+				t.Fatal(err)
+			}
+			var got models.ProcurementOrder
+			if err := db.First(&got, proc.ID).Error; err != nil || got.Status != constants.ProcurementStatusAccepted {
+				t.Fatalf("procurement=%+v err=%v", got, err)
+			}
+		})
+	}
+}
+
 func TestSubmitToUpstream_FansGurusUnavailableFailsForUserWithoutRetry(t *testing.T) {
 	db := setupProcurementTestDB(t)
 

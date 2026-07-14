@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -575,14 +576,20 @@ func (s *ProductMappingService) computeFullSyncInterval() time.Duration {
 }
 
 // syncConnectionStock 按连接批量同步：一次 ListProducts 拉取所有商品，内存匹配映射
-func (s *ProductMappingService) syncConnectionStock(connectionID uint, connMappings []models.ProductMapping, pageSize int, maxPages int) error {
+func (s *ProductMappingService) syncConnectionStock(connectionID uint, connMappings []models.ProductMapping, pageSize, maxPages int) error {
 	conn, err := s.connService.GetByID(connectionID)
 	if err != nil || conn == nil {
 		return fmt.Errorf("get connection %d: %w", connectionID, err)
 	}
 	switch conn.Protocol {
 	case constants.ConnectionProtocolTGXAccount:
-		return s.syncTGXConnectionStock(conn, connMappings)
+		cfg := DefaultUpstreamSyncConfig()
+		if s.settingService != nil {
+			if configured, err := s.settingService.GetUpstreamSyncConfig(""); err == nil {
+				cfg = configured
+			}
+		}
+		return s.syncTGXConnectionStockWithConfig(conn, connMappings, cfg)
 	case constants.ConnectionProtocolFansGurus:
 		// FansGurus has no inventory endpoint. Its availability is maintained by
 		// the provider catalog sync and the upstream order result, not by a fake
@@ -765,6 +772,10 @@ type tgxInventoryRefresh struct {
 // inventory API. TGX uses string shared codes, so it cannot use the generic
 // Dujiao-Next adapter-based stock sync.
 func (s *ProductMappingService) syncTGXConnectionStock(conn *models.SiteConnection, productMappings []models.ProductMapping) error {
+	return s.syncTGXConnectionStockWithConfig(conn, productMappings, DefaultUpstreamSyncConfig())
+}
+
+func (s *ProductMappingService) syncTGXConnectionStockWithConfig(conn *models.SiteConnection, productMappings []models.ProductMapping, cfg UpstreamSyncConfig) error {
 	if s == nil || conn == nil || s.skuMappingRepo == nil || s.connService == nil {
 		return errorsProductMappingDependencyMissing()
 	}
@@ -786,11 +797,15 @@ func (s *ProductMappingService) syncTGXConnectionStock(conn *models.SiteConnecti
 		return err
 	}
 	client := upstream.NewTGXClient(conn.BaseURL, conn.ApiKey, appKey)
+	cfg = NormalizeUpstreamSyncConfig(cfg)
+	startedAt := time.Now()
 	jobs := make(chan *models.SKUMapping)
 	results := make(chan tgxInventoryRefresh, len(skuMappings))
 	var wg sync.WaitGroup
-	const concurrency = 8
-	for range concurrency {
+	requestInterval := time.Second / time.Duration(cfg.TGXInventoryRateLimit)
+	limiter := time.NewTicker(requestInterval)
+	defer limiter.Stop()
+	for range cfg.TGXInventoryConcurrency {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -800,9 +815,7 @@ func (s *ProductMappingService) syncTGXConnectionStock(conn *models.SiteConnecti
 					results <- tgxInventoryRefresh{mapping: skuMapping, err: fmt.Errorf("invalid TGX shared code for SKU mapping %d", skuMapping.ID)}
 					continue
 				}
-				ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-				inventory, inventoryErr := client.GetInventory(ctx, sharedCode, race)
-				cancel()
+				inventory, inventoryErr := getTGXInventoryWithRetry(client, sharedCode, race, cfg.TGXInventoryRetries, limiter.C)
 				if inventoryErr != nil {
 					results <- tgxInventoryRefresh{mapping: skuMapping, err: inventoryErr}
 					continue
@@ -824,9 +837,17 @@ func (s *ProductMappingService) syncTGXConnectionStock(conn *models.SiteConnecti
 
 	now := time.Now()
 	var errs []error
+	failedDetails := make([]map[string]interface{}, 0)
+	succeeded := 0
 	for result := range results {
 		if result.err != nil {
 			errs = append(errs, result.err)
+			failedDetails = append(failedDetails, map[string]interface{}{
+				"sku_mapping_id":    result.mapping.ID,
+				"local_sku_id":      result.mapping.LocalSKUID,
+				"upstream_sku_code": result.mapping.UpstreamSKUCode,
+				"error":             result.err.Error(),
+			})
 			continue
 		}
 		result.mapping.UpstreamStock = result.count
@@ -834,9 +855,54 @@ func (s *ProductMappingService) syncTGXConnectionStock(conn *models.SiteConnecti
 		result.mapping.StockSyncedAt = &now
 		if err := s.skuMappingRepo.Update(result.mapping); err != nil {
 			errs = append(errs, err)
+			failedDetails = append(failedDetails, map[string]interface{}{"sku_mapping_id": result.mapping.ID, "local_sku_id": result.mapping.LocalSKUID, "upstream_sku_code": result.mapping.UpstreamSKUCode, "error": err.Error()})
+			continue
 		}
+		succeeded++
 	}
+	s.recordTGXInventorySyncRun(conn.ID, startedAt, len(skuMappings), succeeded, failedDetails)
 	return errors.Join(errs...)
+}
+
+func getTGXInventoryWithRetry(client *upstream.TGXClient, sharedCode, race string, retries int, limiter <-chan time.Time) (*upstream.TGXInventoryResponse, error) {
+	var lastErr error
+	for attempt := 0; attempt <= retries; attempt++ {
+		<-limiter
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		inventory, err := client.GetInventory(ctx, sharedCode, race)
+		cancel()
+		if err == nil && inventory != nil {
+			return inventory, nil
+		}
+		if err == nil {
+			err = fmt.Errorf("empty TGX inventory response for %s", sharedCode)
+		}
+		lastErr = err
+		if !isRetryableTGXInventoryError(err) || attempt == retries {
+			break
+		}
+		time.Sleep(time.Duration(attempt+1) * 200 * time.Millisecond)
+	}
+	return nil, lastErr
+}
+
+func isRetryableTGXInventoryError(err error) bool {
+	if err == nil || errors.Is(err, upstream.ErrTGXAuth) {
+		return false
+	}
+	message := strings.ToLower(err.Error())
+	return !strings.Contains(message, "invalid") && !strings.Contains(message, "not found")
+}
+
+func (s *ProductMappingService) recordTGXInventorySyncRun(connectionID uint, startedAt time.Time, total, succeeded int, failedDetails []map[string]interface{}) {
+	if s == nil || s.tgxSyncRunRepo == nil {
+		return
+	}
+	status := "success"
+	if len(failedDetails) > 0 {
+		status = "partial"
+	}
+	_ = s.tgxSyncRunRepo.Create(&models.TGXInventorySyncRun{ConnectionID: connectionID, Status: status, Total: total, Succeeded: succeeded, Failed: len(failedDetails), FailedDetails: models.JSON{"items": failedDetails}, StartedAt: startedAt, FinishedAt: time.Now()})
 }
 
 // syncProductFromData 使用已拉取的上游数据同步单个映射（不再发 HTTP 请求）

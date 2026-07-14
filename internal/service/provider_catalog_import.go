@@ -154,6 +154,7 @@ func (s *ProductMappingService) importProviderCatalogItemInTx(tx *gorm.DB, conne
 		UpstreamProductCode:     item.Code,
 		Provider:                item.Provider,
 		Platform:                platform,
+		CatalogReviewStatus:     models.CatalogReviewPending,
 		UpstreamFulfillmentType: constants.FulfillmentTypeManual,
 		UpstreamStatus:          models.UpstreamStatusActive,
 		IsActive:                true,

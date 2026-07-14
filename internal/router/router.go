@@ -544,15 +544,18 @@ func SetupRouter(cfg *config.Config, c *provider.Container) *gin.Engine {
 
 				// 商品映射管理
 				authorized.GET("/product-mappings", adminHandler.GetProductMappings)
+				authorized.GET("/product-mappings/tgx-inventory-health", adminHandler.GetTGXInventorySyncHealth)
 				authorized.GET("/product-mappings/:id", adminHandler.GetProductMapping)
 				authorized.POST("/product-mappings/import", adminHandler.ImportUpstreamProduct)
 				authorized.POST("/product-mappings/batch-import", adminHandler.BatchImportUpstreamProducts)
 				authorized.POST("/product-mappings/:id/sync", adminHandler.SyncProductMapping)
 				authorized.POST("/product-mappings/:id/tgx-inventory", adminHandler.RefreshTGXMappingInventory)
+				authorized.PUT("/product-mappings/:id/platform", adminHandler.CorrectProviderCatalogPlatform)
 				authorized.PUT("/product-mappings/:id/status", adminHandler.UpdateProductMappingStatus)
 				authorized.DELETE("/product-mappings/:id", adminHandler.DeleteProductMapping)
 				authorized.POST("/product-mappings/batch-sync", adminHandler.BatchSyncProductMappings)
 				authorized.POST("/product-mappings/batch-status", adminHandler.BatchUpdateProductMappingStatus)
+				authorized.POST("/product-mappings/batch-approve", adminHandler.ApproveProviderCatalogMappings)
 				authorized.POST("/product-mappings/batch-delete", adminHandler.BatchDeleteProductMappings)
 				authorized.GET("/upstream-products", adminHandler.ListUpstreamProducts)
 				authorized.GET("/upstream-categories", adminHandler.ListUpstreamCategories)

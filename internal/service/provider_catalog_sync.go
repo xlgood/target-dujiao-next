@@ -25,16 +25,24 @@ type ProviderCatalogSyncInput struct {
 }
 
 type ProviderCatalogSyncResult struct {
-	FansGurusPulled    int      `json:"fans_gurus_pulled"`
-	TGXPulled          int      `json:"tgx_pulled"`
-	SupportedPlatforms []string `json:"supported_platforms"`
-	FilteredTelegram   int      `json:"filtered_telegram"`
-	FilteredInactive   int      `json:"filtered_inactive"`
-	FilteredPlatform   int      `json:"filtered_platform"`
-	Imported           int      `json:"imported"`
-	Updated            int      `json:"updated"`
-	Skipped            int      `json:"skipped"`
-	Deactivated        int      `json:"deactivated"`
+	FansGurusPulled    int                           `json:"fans_gurus_pulled"`
+	TGXPulled          int                           `json:"tgx_pulled"`
+	SupportedPlatforms []string                      `json:"supported_platforms"`
+	FilteredTelegram   int                           `json:"filtered_telegram"`
+	FilteredInactive   int                           `json:"filtered_inactive"`
+	FilteredPlatform   int                           `json:"filtered_platform"`
+	Imported           int                           `json:"imported"`
+	Updated            int                           `json:"updated"`
+	Skipped            int                           `json:"skipped"`
+	Deactivated        int                           `json:"deactivated"`
+	FilterReasons      []ProviderCatalogFilterReason `json:"filter_reasons"`
+}
+
+type ProviderCatalogFilterReason struct {
+	Provider string `json:"provider"`
+	Code     string `json:"code"`
+	Name     string `json:"name"`
+	Reason   string `json:"reason"`
 }
 
 func (s *ProductMappingService) SyncProviderCatalogWithClients(
@@ -107,9 +115,31 @@ func (s *ProductMappingService) SyncProviderCatalogWithClients(
 		Updated:            importResult.Updated,
 		Skipped:            importResult.Skipped,
 		Deactivated:        deactivated,
+		FilterReasons:      providerCatalogFilterReasons(filtered),
 	}
 	s.recordProviderCatalogSyncRun(startedAt, fansServices, tgxItems.Items, result, nil)
 	return result, nil
+}
+
+func providerCatalogFilterReasons(catalog upstream.FilteredCatalog) []ProviderCatalogFilterReason {
+	const maxReasons = 200
+	result := make([]ProviderCatalogFilterReason, 0)
+	for _, group := range []struct {
+		reason string
+		items  []upstream.ProviderCatalogItem
+	}{
+		{"telegram", catalog.FilteredTelegram},
+		{"inactive_or_unsupported_service_type", catalog.FilteredInactive},
+		{"platform_not_allowlisted", catalog.FilteredPlatform},
+	} {
+		for _, item := range group.items {
+			if len(result) >= maxReasons {
+				return result
+			}
+			result = append(result, ProviderCatalogFilterReason{Provider: item.Provider, Code: item.Code, Name: item.Name, Reason: group.reason})
+		}
+	}
+	return result
 }
 
 func (s *ProductMappingService) deactivateStaleProviderCatalogMappings(input ProviderCatalogSyncInput, catalog upstream.FilteredCatalog) (int, error) {

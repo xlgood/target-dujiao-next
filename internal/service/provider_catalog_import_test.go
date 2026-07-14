@@ -170,6 +170,46 @@ func TestImportProviderCatalogUsesSharedPlatformImage(t *testing.T) {
 	}
 }
 
+func TestProviderCatalogApprovalAndPlatformCorrection(t *testing.T) {
+	db := setupProviderCatalogImportDB(t)
+	connService := NewSiteConnectionService(repository.NewSiteConnectionRepository(db), "test-key", t.TempDir())
+	conn, err := connService.Create(CreateConnectionInput{Name: "Fans", BaseURL: "https://fans.example", ApiKey: "key", ApiSecret: "secret", Protocol: constants.ConnectionProtocolFansGurus})
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc := NewProductMappingService(repository.NewProductMappingRepository(db), repository.NewSKUMappingRepository(db), repository.NewProductRepository(db), repository.NewProductSKURepository(db), repository.NewCategoryRepository(db), connService)
+	catalog := upstream.FilteredCatalog{FansGurus: []upstream.ProviderCatalogItem{{Provider: upstream.CatalogProviderFansGurus, Code: "100", Name: "Instagram Followers", Category: "Instagram", UpstreamPrice: "2", TargetPrice: "2", Active: true}}}
+	if _, err := svc.ImportProviderCatalogByProviderConnections(map[string]uint{upstream.CatalogProviderFansGurus: conn.ID}, catalog); err != nil {
+		t.Fatal(err)
+	}
+	var mapping models.ProductMapping
+	if err := db.First(&mapping).Error; err != nil {
+		t.Fatal(err)
+	}
+	var product models.Product
+	if err := db.First(&product, mapping.LocalProductID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if mapping.CatalogReviewStatus != models.CatalogReviewPending || product.IsActive {
+		t.Fatalf("unreviewed state mapping=%+v product=%+v", mapping, product)
+	}
+	if err := svc.CorrectProviderCatalogPlatform(mapping.ID, "facebook"); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.First(&mapping, mapping.ID).Error; err != nil || mapping.Platform != "facebook" {
+		t.Fatalf("mapping=%+v err=%v", mapping, err)
+	}
+	if err := db.First(&product, product.ID).Error; err != nil || len(product.Images) != 1 || product.Images[0] != "/uploads/catalog/facebook.svg" {
+		t.Fatalf("product=%+v err=%v", product, err)
+	}
+	if count, err := svc.ApproveProviderCatalogMappings([]uint{mapping.ID}); err != nil || count != 1 {
+		t.Fatalf("approve count=%d err=%v", count, err)
+	}
+	if err := db.First(&product, product.ID).Error; err != nil || !product.IsActive {
+		t.Fatalf("published product=%+v err=%v", product, err)
+	}
+}
+
 func TestCreateTGXCatalogVariantLeavesStockPending(t *testing.T) {
 	db := setupProviderCatalogImportDB(t)
 	svc := NewProductMappingService(
@@ -397,6 +437,7 @@ func setupProviderCatalogImportDB(t *testing.T) *gorm.DB {
 		&models.ProductMapping{},
 		&models.SKUMapping{},
 		&models.ProviderCatalogSyncRun{},
+		&models.TGXInventorySyncRun{},
 	); err != nil {
 		t.Fatalf("auto migrate: %v", err)
 	}

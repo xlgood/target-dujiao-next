@@ -133,6 +133,28 @@ func ensureProviderCatalogImageMigration() error {
 	})
 }
 
+// Existing provider catalog products were explicitly enabled by operators
+// before staged review existed, so retain their publication state on upgrade.
+func ensureProviderCatalogReviewMigration() error {
+	if DB == nil {
+		return errors.New("database is not initialized")
+	}
+	var marker Setting
+	if err := DB.First(&marker, "key = ?", catalogReviewMigrationSettingKey).Error; err == nil && migrationDone(marker.ValueJSON) {
+		return nil
+	} else if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		return err
+	}
+	return DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&ProductMapping{}).
+			Where("provider IN ? AND catalog_review_status <> ?", []string{"tgx", "fansgurus"}, CatalogReviewApproved).
+			Update("catalog_review_status", "approved").Error; err != nil {
+			return err
+		}
+		return tx.Save(&Setting{Key: catalogReviewMigrationSettingKey, ValueJSON: JSON{"done": true, "migrated_at": time.Now().UTC().Format(time.RFC3339)}}).Error
+	})
+}
+
 // ensureOrderItemOriginalPriceMigration 为历史订单项回填原价快照。
 // 历史数据没有真实原价，只能以当时已记录的 unit_price/total_price 作为兼容回填。
 func ensureOrderItemOriginalPriceMigration() error {

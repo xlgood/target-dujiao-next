@@ -194,3 +194,72 @@ func TestSyncTGXConnectionStockRefreshesAllMappedSKUs(t *testing.T) {
 		t.Fatalf("unexpected bulk stock state: %+v", got)
 	}
 }
+
+func TestSyncTGXConnectionStockRetriesAndRecordsFailures(t *testing.T) {
+	requests := map[string]int{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		code := r.FormValue("sharedCode")
+		requests[code]++
+		w.Header().Set("Content-Type", "application/json")
+		if code == "TGX-RETRY" && requests[code] == 1 {
+			w.WriteHeader(http.StatusBadGateway)
+			return
+		}
+		if code == "TGX-FAIL" {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"code": 200, "data": map[string]interface{}{"count": 9}})
+	}))
+	defer server.Close()
+
+	db := setupProviderCatalogImportDB(t)
+	if err := db.AutoMigrate(&models.SiteConnection{}, &models.TGXInventorySyncRun{}); err != nil {
+		t.Fatal(err)
+	}
+	connService := NewSiteConnectionService(repository.NewSiteConnectionRepository(db), "test-encryption-key", t.TempDir())
+	conn, err := connService.Create(CreateConnectionInput{Name: "TGX", BaseURL: server.URL, ApiKey: "app-id", ApiSecret: "app-key", Protocol: constants.ConnectionProtocolTGXAccount})
+	if err != nil {
+		t.Fatal(err)
+	}
+	product := models.Product{CategoryID: 1, Slug: "tgx-retry", TitleJSON: models.JSON{"zh-CN": "TGX retry"}, IsMapped: true}
+	if err := db.Create(&product).Error; err != nil {
+		t.Fatal(err)
+	}
+	mapping := models.ProductMapping{ConnectionID: conn.ID, LocalProductID: product.ID, Provider: upstream.CatalogProviderTGX, IsActive: true}
+	if err := db.Create(&mapping).Error; err != nil {
+		t.Fatal(err)
+	}
+	for _, code := range []string{"TGX-RETRY", "TGX-FAIL"} {
+		sku := models.ProductSKU{ProductID: product.ID, SKUCode: code, IsActive: true}
+		if err := db.Create(&sku).Error; err != nil {
+			t.Fatal(err)
+		}
+		if err := db.Create(&models.SKUMapping{ProductMappingID: mapping.ID, LocalSKUID: sku.ID, UpstreamSKUCode: code, UpstreamStock: -1, UpstreamIsActive: true}).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	svc := NewProductMappingService(repository.NewProductMappingRepository(db), repository.NewSKUMappingRepository(db), repository.NewProductRepository(db), repository.NewProductSKURepository(db), repository.NewCategoryRepository(db), connService)
+	svc.SetTGXInventorySyncRunRepository(repository.NewTGXInventorySyncRunRepository(db))
+	cfg := DefaultUpstreamSyncConfig()
+	cfg.TGXInventoryConcurrency = 1
+	cfg.TGXInventoryRateLimit = 20
+	cfg.TGXInventoryRetries = 1
+	if err := svc.syncTGXConnectionStockWithConfig(conn, []models.ProductMapping{mapping}, cfg); err == nil {
+		t.Fatal("expected partial sync error")
+	}
+	if requests["TGX-RETRY"] != 2 || requests["TGX-FAIL"] != 2 {
+		t.Fatalf("request counts=%v", requests)
+	}
+	var success models.SKUMapping
+	if err := db.Where("upstream_sku_code = ?", "TGX-RETRY").First(&success).Error; err != nil || success.UpstreamStock != 9 {
+		t.Fatalf("retry SKU=%+v err=%v", success, err)
+	}
+	var run models.TGXInventorySyncRun
+	if err := db.Order("id DESC").First(&run).Error; err != nil {
+		t.Fatal(err)
+	}
+	if run.Status != "partial" || run.Total != 2 || run.Succeeded != 1 || run.Failed != 1 {
+		t.Fatalf("run=%+v", run)
+	}
+}

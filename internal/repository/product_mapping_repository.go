@@ -34,6 +34,7 @@ type ProductMappingListFilter struct {
 	ConnectionID   uint
 	UpstreamStatus string // active / inactive / deleted，空值不筛选
 	ProductStatus  string // active / inactive，空值不筛选
+	ReviewStatus   string // pending / approved，空值不筛选
 	Search         string // 商品名称模糊搜索，空值不筛选
 	Pagination
 }
@@ -134,6 +135,9 @@ func (r *GormProductMappingRepository) List(filter ProductMappingListFilter) ([]
 		q = q.Where("product_mappings.is_active = ?", true)
 	} else if filter.ProductStatus == "inactive" {
 		q = q.Where("product_mappings.is_active = ?", false)
+	}
+	if filter.ReviewStatus != "" {
+		q = q.Where("catalog_review_status = ?", filter.ReviewStatus)
 	}
 	if filter.Search != "" {
 		like := "%" + filter.Search + "%"

@@ -3,10 +3,12 @@ package service
 import (
 	"errors"
 	"strconv"
+	"strings"
 
 	"github.com/dujiao-next/internal/constants"
 	"github.com/dujiao-next/internal/models"
 	"github.com/dujiao-next/internal/repository"
+	"github.com/dujiao-next/internal/upstream"
 )
 
 // 文件组织约定:
@@ -38,6 +40,7 @@ type ProductMappingService struct {
 	mediaService    *MediaService
 	settingService  *SettingService
 	syncRunRepo     repository.ProviderCatalogSyncRunRepository
+	tgxSyncRunRepo  repository.TGXInventorySyncRunRepository
 }
 
 // NewProductMappingService 创建商品映射服务
@@ -78,6 +81,17 @@ func (s *ProductMappingService) SetProviderCatalogSyncRunRepository(repo reposit
 	s.syncRunRepo = repo
 }
 
+func (s *ProductMappingService) SetTGXInventorySyncRunRepository(repo repository.TGXInventorySyncRunRepository) {
+	s.tgxSyncRunRepo = repo
+}
+
+func (s *ProductMappingService) LatestTGXInventorySyncRun(connectionID uint) (*models.TGXInventorySyncRun, error) {
+	if s == nil || s.tgxSyncRunRepo == nil {
+		return nil, nil
+	}
+	return s.tgxSyncRunRepo.Latest(connectionID)
+}
+
 // GetByID 获取映射详情
 func (s *ProductMappingService) GetByID(id uint) (*models.ProductMapping, error) {
 	return s.mappingRepo.GetByID(id)
@@ -98,13 +112,133 @@ func (s *ProductMappingService) SetActive(id uint, active bool) error {
 		return ErrMappingNotFound
 	}
 	mapping.IsActive = active
+	if active && isProviderCatalogMapping(mapping) && mapping.CatalogReviewStatus != models.CatalogReviewApproved {
+		return ErrCatalogReviewRequired
+	}
 	if err := s.mappingRepo.Update(mapping); err != nil {
 		return err
 	}
 	if !active {
 		return s.deactivateMappedProduct(mapping)
 	}
+	return s.publishMappedProduct(mapping)
+}
+
+var ErrCatalogReviewRequired = errors.New("provider catalog product must be approved before publishing")
+
+func isProviderCatalogMapping(mapping *models.ProductMapping) bool {
+	if mapping == nil {
+		return false
+	}
+	provider := strings.ToLower(strings.TrimSpace(mapping.Provider))
+	return provider == "fansgurus" || provider == "tgx"
+}
+
+// ApproveProviderCatalogMappings stages selected catalog items for storefront
+// publication. A later catalog refresh may update metadata but never resets an
+// operator's approval decision.
+func (s *ProductMappingService) ApproveProviderCatalogMappings(ids []uint) (int, error) {
+	approved := 0
+	for _, id := range ids {
+		mapping, err := s.mappingRepo.GetByID(id)
+		if err != nil {
+			return approved, err
+		}
+		if mapping == nil || !isProviderCatalogMapping(mapping) {
+			continue
+		}
+		mapping.CatalogReviewStatus = models.CatalogReviewApproved
+		mapping.IsActive = true
+		if err := s.mappingRepo.Update(mapping); err != nil {
+			return approved, err
+		}
+		if err := s.publishMappedProduct(mapping); err != nil {
+			return approved, err
+		}
+		approved++
+	}
+	return approved, nil
+}
+
+// CorrectProviderCatalogPlatform applies the operator-selected platform to
+// category, shared image, and SKU label together.
+func (s *ProductMappingService) CorrectProviderCatalogPlatform(id uint, platform string) error {
+	mapping, err := s.mappingRepo.GetByID(id)
+	if err != nil {
+		return err
+	}
+	if mapping == nil {
+		return ErrMappingNotFound
+	}
+	platform = strings.TrimSpace(platform)
+	if !isProviderCatalogMapping(mapping) || !isManualProviderPlatformAllowed(mapping.Provider, platform) {
+		return ErrCatalogPlatformInvalid
+	}
+	product, err := s.productRepo.GetByID(strconv.FormatUint(uint64(mapping.LocalProductID), 10))
+	if err != nil || product == nil {
+		return ErrMappingNotFound
+	}
+	category, err := s.findOrCreateProviderCategory(platform)
+	if err != nil {
+		return err
+	}
+	product.CategoryID = category.ID
+	product.Images = models.StringArray{models.ProviderCatalogImagePath(platform)}
+	if err := s.productRepo.Update(product); err != nil {
+		return err
+	}
+	mapping.Platform = platform
+	if err := s.mappingRepo.Update(mapping); err != nil {
+		return err
+	}
+	skuMappings, err := s.skuMappingRepo.ListByProductMapping(mapping.ID)
+	if err != nil {
+		return err
+	}
+	for _, skuMapping := range skuMappings {
+		sku, err := s.productSKURepo.GetByID(skuMapping.LocalSKUID)
+		if err != nil || sku == nil {
+			if err != nil {
+				return err
+			}
+			continue
+		}
+		variantName := ""
+		if parts := strings.SplitN(skuMapping.UpstreamSKUCode, "|", 2); len(parts) == 2 {
+			variantName = strings.TrimSpace(parts[1])
+		}
+		sku.SpecValuesJSON = providerVariantSpecValues(mapping.Provider, platform, upstream.ProviderCatalogVariant{Name: variantName})
+		if err := s.productSKURepo.Update(sku); err != nil {
+			return err
+		}
+	}
 	return nil
+}
+
+var ErrCatalogPlatformInvalid = errors.New("invalid provider catalog platform")
+
+func isManualProviderPlatformAllowed(provider, platform string) bool {
+	allowed := map[string]map[string]bool{
+		"fansgurus": {"x": true, "instagram": true, "facebook": true, "tiktok": true, "youtube": true, "vk": true, "spotify": true, "discord": true, "twitch": true, "reddit": true, "linkedin": true, "github": true, "quora": true, "whatsapp": true, "line-voom": true, "threads": true},
+		"tgx":       {"x": true, "facebook": true, "instagram": true, "youtube": true, "tiktok": true, "gmail": true, "threads": true, "linkedin": true, "github": true, "reddit": true, "discord": true, "outlook": true, "hotmail": true, "overseas-email": true},
+	}
+	return allowed[strings.ToLower(strings.TrimSpace(provider))][platform]
+}
+
+func (s *ProductMappingService) findOrCreateProviderCategory(platform string) (*models.Category, error) {
+	if s.categoryRepo == nil {
+		return nil, errors.New("category repository dependency missing")
+	}
+	slug := "platform-" + normalizeProviderSlug(platform)
+	category, err := s.categoryRepo.GetBySlug(slug)
+	if err != nil || category != nil {
+		return category, err
+	}
+	category = &models.Category{Slug: slug, NameJSON: localizedText(platform), IsActive: true}
+	if err := s.categoryRepo.Create(category); err != nil {
+		return nil, err
+	}
+	return category, nil
 }
 
 func (s *ProductMappingService) deactivateMappedProduct(mapping *models.ProductMapping) error {
@@ -117,6 +251,21 @@ func (s *ProductMappingService) deactivateMappedProduct(mapping *models.ProductM
 	}
 	if product != nil && product.FulfillmentType == constants.FulfillmentTypeUpstream && product.IsActive {
 		product.IsActive = false
+		return s.productRepo.Update(product)
+	}
+	return nil
+}
+
+func (s *ProductMappingService) publishMappedProduct(mapping *models.ProductMapping) error {
+	if mapping == nil || mapping.LocalProductID == 0 || s.productRepo == nil {
+		return nil
+	}
+	product, err := s.productRepo.GetByID(strconv.FormatUint(uint64(mapping.LocalProductID), 10))
+	if err != nil {
+		return err
+	}
+	if product != nil && product.FulfillmentType == constants.FulfillmentTypeUpstream && !product.IsActive {
+		product.IsActive = true
 		return s.productRepo.Update(product)
 	}
 	return nil

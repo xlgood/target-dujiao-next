@@ -460,6 +460,9 @@ const (
 	SettingFieldUpstreamSyncPageSize    = "sync_page_size"
 	SettingFieldUpstreamSyncMaxPages    = "sync_max_pages"
 	SettingFieldUpstreamSyncConcurrency = "sync_conn_concurrency"
+	SettingFieldTGXInventoryConcurrency = "tgx_inventory_concurrency"
+	SettingFieldTGXInventoryRateLimit   = "tgx_inventory_rate_limit_per_second"
+	SettingFieldTGXInventoryRetries     = "tgx_inventory_retries"
 
 	SettingKeyCallbackRoutesConfig = "callback_routes_config"
 

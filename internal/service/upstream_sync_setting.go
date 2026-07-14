@@ -22,6 +22,14 @@ const (
 	upstreamSyncConnConcurrencyDef = 3
 	upstreamSyncConnConcurrencyMin = 1
 	upstreamSyncConnConcurrencyMax = 10
+	tgxInventoryConcurrencyDefault = 4
+	tgxInventoryConcurrencyMin     = 1
+	tgxInventoryConcurrencyMax     = 10
+	tgxInventoryRateLimitDefault   = 4
+	tgxInventoryRateLimitMin       = 1
+	tgxInventoryRateLimitMax       = 20
+	tgxInventoryRetriesDefault     = 2
+	tgxInventoryRetriesMax         = 5
 )
 
 // UpstreamSyncConfig 上游同步配置。
@@ -31,6 +39,9 @@ type UpstreamSyncConfig struct {
 	SyncPageSize              int  `json:"sync_page_size"`
 	SyncMaxPages              int  `json:"sync_max_pages"`
 	SyncConnConcurrency       int  `json:"sync_conn_concurrency"`
+	TGXInventoryConcurrency   int  `json:"tgx_inventory_concurrency"`
+	TGXInventoryRateLimit     int  `json:"tgx_inventory_rate_limit_per_second"`
+	TGXInventoryRetries       int  `json:"tgx_inventory_retries"`
 }
 
 // DefaultUpstreamSyncConfig 默认上游同步配置。
@@ -41,6 +52,9 @@ func DefaultUpstreamSyncConfig() UpstreamSyncConfig {
 		SyncPageSize:              upstreamSyncPageSizeDefault,
 		SyncMaxPages:              upstreamSyncMaxPagesDefault,
 		SyncConnConcurrency:       upstreamSyncConnConcurrencyDef,
+		TGXInventoryConcurrency:   tgxInventoryConcurrencyDefault,
+		TGXInventoryRateLimit:     tgxInventoryRateLimitDefault,
+		TGXInventoryRetries:       tgxInventoryRetriesDefault,
 	}
 }
 
@@ -70,6 +84,15 @@ func NormalizeUpstreamSyncConfig(cfg UpstreamSyncConfig) UpstreamSyncConfig {
 	if cfg.SyncConnConcurrency > upstreamSyncConnConcurrencyMax {
 		cfg.SyncConnConcurrency = upstreamSyncConnConcurrencyMax
 	}
+	if cfg.TGXInventoryConcurrency < tgxInventoryConcurrencyMin || cfg.TGXInventoryConcurrency > tgxInventoryConcurrencyMax {
+		cfg.TGXInventoryConcurrency = tgxInventoryConcurrencyDefault
+	}
+	if cfg.TGXInventoryRateLimit < tgxInventoryRateLimitMin || cfg.TGXInventoryRateLimit > tgxInventoryRateLimitMax {
+		cfg.TGXInventoryRateLimit = tgxInventoryRateLimitDefault
+	}
+	if cfg.TGXInventoryRetries < 0 || cfg.TGXInventoryRetries > tgxInventoryRetriesMax {
+		cfg.TGXInventoryRetries = tgxInventoryRetriesDefault
+	}
 	return cfg
 }
 
@@ -94,6 +117,15 @@ func upstreamSyncConfigFromJSON(raw models.JSON, fallback UpstreamSyncConfig) Up
 	if v, err := parseSettingInt(raw[constants.SettingFieldUpstreamSyncConcurrency]); err == nil {
 		result.SyncConnConcurrency = v
 	}
+	if v, err := parseSettingInt(raw[constants.SettingFieldTGXInventoryConcurrency]); err == nil {
+		result.TGXInventoryConcurrency = v
+	}
+	if v, err := parseSettingInt(raw[constants.SettingFieldTGXInventoryRateLimit]); err == nil {
+		result.TGXInventoryRateLimit = v
+	}
+	if v, err := parseSettingInt(raw[constants.SettingFieldTGXInventoryRetries]); err == nil {
+		result.TGXInventoryRetries = v
+	}
 	return NormalizeUpstreamSyncConfig(result)
 }
 
@@ -106,6 +138,9 @@ func UpstreamSyncConfigToMap(cfg UpstreamSyncConfig) models.JSON {
 		constants.SettingFieldUpstreamSyncPageSize:    normalized.SyncPageSize,
 		constants.SettingFieldUpstreamSyncMaxPages:    normalized.SyncMaxPages,
 		constants.SettingFieldUpstreamSyncConcurrency: normalized.SyncConnConcurrency,
+		constants.SettingFieldTGXInventoryConcurrency: normalized.TGXInventoryConcurrency,
+		constants.SettingFieldTGXInventoryRateLimit:   normalized.TGXInventoryRateLimit,
+		constants.SettingFieldTGXInventoryRetries:     normalized.TGXInventoryRetries,
 	}
 }
 

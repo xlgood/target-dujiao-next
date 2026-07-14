@@ -56,6 +56,7 @@ type Container struct {
 	ProductMappingRepo         repository.ProductMappingRepository
 	SKUMappingRepo             repository.SKUMappingRepository
 	ProviderCatalogSyncRunRepo repository.ProviderCatalogSyncRunRepository
+	TGXInventorySyncRunRepo    repository.TGXInventorySyncRunRepository
 	ProcurementOrderRepo       repository.ProcurementOrderRepository
 	DownstreamOrderRefRepo     repository.DownstreamOrderRefRepository
 	ReconciliationJobRepo      repository.ReconciliationJobRepository
@@ -216,6 +217,7 @@ func (c *Container) initRepositories() {
 	c.ProductMappingRepo = repository.NewProductMappingRepository(db)
 	c.SKUMappingRepo = repository.NewSKUMappingRepository(db)
 	c.ProviderCatalogSyncRunRepo = repository.NewProviderCatalogSyncRunRepository(db)
+	c.TGXInventorySyncRunRepo = repository.NewTGXInventorySyncRunRepository(db)
 	c.ProcurementOrderRepo = repository.NewProcurementOrderRepository(db)
 	c.DownstreamOrderRefRepo = repository.NewDownstreamOrderRefRepository(db)
 	c.ReconciliationJobRepo = repository.NewReconciliationJobRepository(db)
@@ -336,6 +338,7 @@ func (c *Container) initServices() {
 	c.ProductMappingService.SetCategoryService(c.CategoryService)
 	c.ProductMappingService.SetSettingService(c.SettingService)
 	c.ProductMappingService.SetProviderCatalogSyncRunRepository(c.ProviderCatalogSyncRunRepo)
+	c.ProductMappingService.SetTGXInventorySyncRunRepository(c.TGXInventorySyncRunRepo)
 	c.SiteConnectionService.SetMarkupReapplier(c.ProductMappingService)
 	c.OrderService.SetProductMappingService(c.ProductMappingService)
 	c.DownstreamCallbackService = service.NewDownstreamCallbackService(c.DownstreamOrderRefRepo, c.OrderRepo, c.ApiCredentialRepo, c.QueueClient)

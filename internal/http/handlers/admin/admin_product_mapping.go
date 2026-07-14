@@ -34,12 +34,18 @@ func (h *Handler) GetProductMappings(c *gin.Context) {
 		shared.RespondError(c, response.CodeBadRequest, "error.invalid_product_status", nil)
 		return
 	}
+	reviewStatus := c.Query("review_status")
+	if reviewStatus != "" && reviewStatus != models.CatalogReviewPending && reviewStatus != models.CatalogReviewApproved {
+		shared.RespondError(c, response.CodeBadRequest, "error.bad_request", nil)
+		return
+	}
 	search := c.Query("search")
 
 	mappings, total, err := h.ProductMappingService.List(repository.ProductMappingListFilter{
 		ConnectionID:   connectionID,
 		UpstreamStatus: upstreamStatus,
 		ProductStatus:  productStatus,
+		ReviewStatus:   reviewStatus,
 		Search:         search,
 		Pagination: repository.Pagination{
 			Page:     page,
@@ -53,6 +59,60 @@ func (h *Handler) GetProductMappings(c *gin.Context) {
 
 	pagination := response.BuildPagination(page, pageSize, total)
 	response.SuccessWithPage(c, mappings, pagination)
+}
+
+type CorrectProviderCatalogPlatformRequest struct {
+	Platform string `json:"platform" binding:"required"`
+}
+
+func (h *Handler) CorrectProviderCatalogPlatform(c *gin.Context) {
+	id, err := shared.ParseParamUint(c, "id")
+	if err != nil {
+		shared.RespondError(c, response.CodeBadRequest, "error.bad_request", err)
+		return
+	}
+	var req CorrectProviderCatalogPlatformRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		shared.RespondBindError(c, err)
+		return
+	}
+	if err := h.ProductMappingService.CorrectProviderCatalogPlatform(id, req.Platform); err != nil {
+		if errors.Is(err, service.ErrMappingNotFound) {
+			shared.RespondError(c, response.CodeNotFound, "error.mapping_not_found", nil)
+			return
+		}
+		shared.RespondError(c, response.CodeBadRequest, "error.bad_request", err)
+		return
+	}
+	response.Success(c, gin.H{"id": id})
+}
+
+func (h *Handler) ApproveProviderCatalogMappings(c *gin.Context) {
+	var req BatchMappingActionRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		shared.RespondBindError(c, err)
+		return
+	}
+	count, err := h.ProductMappingService.ApproveProviderCatalogMappings(req.IDs)
+	if err != nil {
+		shared.RespondError(c, response.CodeInternal, "error.mapping_update_failed", err)
+		return
+	}
+	response.Success(c, gin.H{"total": len(req.IDs), "success_count": count})
+}
+
+func (h *Handler) GetTGXInventorySyncHealth(c *gin.Context) {
+	connectionID, err := shared.ParseQueryUint(c.Query("connection_id"), false)
+	if err != nil {
+		shared.RespondError(c, response.CodeBadRequest, "error.bad_request", err)
+		return
+	}
+	run, err := h.ProductMappingService.LatestTGXInventorySyncRun(connectionID)
+	if err != nil {
+		shared.RespondError(c, response.CodeInternal, "error.mapping_fetch_failed", err)
+		return
+	}
+	response.Success(c, run)
 }
 
 // GetProductMapping 获取商品映射详情

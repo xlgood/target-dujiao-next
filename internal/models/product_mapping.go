@@ -13,6 +13,11 @@ const (
 	UpstreamStatusDeleted  = "deleted"  // 上游已删除（软删），不再存在
 )
 
+const (
+	CatalogReviewPending  = "pending"
+	CatalogReviewApproved = "approved"
+)
+
 // ProductMapping 商品映射表
 type ProductMapping struct {
 	ID                      uint           `gorm:"primarykey" json:"id"`
@@ -22,6 +27,7 @@ type ProductMapping struct {
 	UpstreamProductCode     string         `gorm:"type:varchar(128);index" json:"upstream_product_code"`
 	Provider                string         `gorm:"type:varchar(32);index" json:"provider"`
 	Platform                string         `gorm:"type:varchar(32);index" json:"platform"`
+	CatalogReviewStatus     string         `gorm:"type:varchar(16);not null;default:'pending';index" json:"catalog_review_status"`
 	UpstreamFulfillmentType string         `gorm:"type:varchar(20);not null;default:'manual'" json:"upstream_fulfillment_type"` // 上游原始交付类型（auto/manual）
 	UpstreamStatus          string         `gorm:"type:varchar(16);not null;default:'active';index" json:"upstream_status"`     // 上游商品状态：active/inactive/deleted
 	IsActive                bool           `gorm:"not null;default:true" json:"is_active"`
