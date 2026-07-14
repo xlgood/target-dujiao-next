@@ -64,6 +64,79 @@ func migrationDone(value JSON) bool {
 	return ok && flag
 }
 
+// ensureTGXUnknownStockMigration distinguishes a TGX catalog placeholder from
+// an actual unlimited inventory result. TGX catalog responses do not include
+// a reliable stock count, so -1 is only a pending real-time lookup.
+func ensureTGXUnknownStockMigration() error {
+	if DB == nil {
+		return errors.New("database is not initialized")
+	}
+	var marker Setting
+	if err := DB.First(&marker, "key = ?", tgxUnknownStockMigrationSettingKey).Error; err != nil {
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return err
+		}
+	} else if migrationDone(marker.ValueJSON) {
+		return nil
+	}
+
+	return DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Exec(`
+			UPDATE sku_mappings
+			SET stock_synced_at = NULL
+			WHERE upstream_stock = -1
+			  AND product_mapping_id IN (
+				SELECT id FROM product_mappings
+				WHERE provider = 'tgx' AND deleted_at IS NULL
+			  )
+		`).Error; err != nil {
+			return err
+		}
+		return tx.Save(&Setting{
+			Key:       tgxUnknownStockMigrationSettingKey,
+			ValueJSON: JSON{"done": true, "migrated_at": time.Now().UTC().Format(time.RFC3339)},
+		}).Error
+	})
+}
+
+// ensureProviderCatalogImageMigration replaces upstream product covers with a
+// small fixed set of local category images. This prevents hotlink failures and
+// keeps catalog storage bounded regardless of SKU count.
+func ensureProviderCatalogImageMigration() error {
+	if DB == nil {
+		return errors.New("database is not initialized")
+	}
+	var marker Setting
+	if err := DB.First(&marker, "key = ?", providerCatalogImageMigrationSettingKey).Error; err != nil {
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return err
+		}
+	} else if migrationDone(marker.ValueJSON) {
+		return nil
+	}
+
+	return DB.Transaction(func(tx *gorm.DB) error {
+		var mappings []ProductMapping
+		if err := tx.Where("provider IN ? AND deleted_at IS NULL", []string{"tgx", "fansgurus"}).Find(&mappings).Error; err != nil {
+			return err
+		}
+		for _, mapping := range mappings {
+			imagePath := ProviderCatalogImagePath(mapping.Platform)
+			if imagePath == "" {
+				continue
+			}
+			if err := tx.Model(&Product{}).Where("id = ?", mapping.LocalProductID).
+				Update("images", StringArray{imagePath}).Error; err != nil {
+				return err
+			}
+		}
+		return tx.Save(&Setting{
+			Key:       providerCatalogImageMigrationSettingKey,
+			ValueJSON: JSON{"done": true, "migrated_at": time.Now().UTC().Format(time.RFC3339)},
+		}).Error
+	})
+}
+
 // ensureOrderItemOriginalPriceMigration 为历史订单项回填原价快照。
 // 历史数据没有真实原价，只能以当时已记录的 unit_price/total_price 作为兼容回填。
 func ensureOrderItemOriginalPriceMigration() error {

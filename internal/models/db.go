@@ -21,6 +21,8 @@ const (
 	paymentProviderBepusdtRenameMigrationSettingKey = "migration/payment_provider_bepusdt_rename_v1"
 	orderItemOriginalPriceMigrationKey              = "migration/order_item_original_price_v1"
 	fansGurusPriceBasisMigrationSettingKey          = "migration/fansgurus_price_basis_v1"
+	providerCatalogImageMigrationSettingKey         = "migration/provider_catalog_images_v1"
+	tgxUnknownStockMigrationSettingKey              = "migration/tgx_unknown_stock_v1"
 	manualStockUnlimitedValue                       = -1
 )
 
@@ -194,6 +196,12 @@ func AutoMigrate() error {
 		return err
 	}
 	if err := ensureFansGurusPriceBasisMigration(); err != nil {
+		return err
+	}
+	if err := ensureTGXUnknownStockMigration(); err != nil {
+		return err
+	}
+	if err := ensureProviderCatalogImageMigration(); err != nil {
 		return err
 	}
 	if err := ensureResellerIndexes(DB); err != nil {

@@ -510,6 +510,7 @@ func (h *Handler) applyUpstreamDisplayTypes(products []models.Product) {
 
 		var totalStock int64
 		hasUnlimited := false
+		hasUnknownStock := false
 
 		for j := range p.SKUs {
 			sku := &p.SKUs[j]
@@ -518,6 +519,12 @@ func (h *Handler) applyUpstreamDisplayTypes(products []models.Product) {
 				continue
 			}
 
+			isTGXPendingStock := mp.Provider == "tgx" && sm.UpstreamStock == -1 && sm.StockSyncedAt == nil
+			if isTGXPendingStock {
+				hasUnknownStock = true
+				sku.UpstreamStockUnknown = true
+				continue
+			}
 			if sm.UpstreamIsActive && sm.UpstreamStock == -1 {
 				hasUnlimited = true
 			} else {
@@ -533,6 +540,10 @@ func (h *Handler) applyUpstreamDisplayTypes(products []models.Product) {
 		}
 
 		// 填充商品级汇总库存
+		if hasUnknownStock {
+			p.UpstreamStockUnknown = true
+			continue
+		}
 		if displayType == constants.FulfillmentTypeAuto {
 			if hasUnlimited {
 				p.AutoStockAvailable = -1

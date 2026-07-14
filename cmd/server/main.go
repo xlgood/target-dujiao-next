@@ -9,6 +9,7 @@ import (
 
 	"github.com/dujiao-next/internal/admincmd"
 	"github.com/dujiao-next/internal/app"
+	"github.com/dujiao-next/internal/catalogassets"
 	"github.com/dujiao-next/internal/config"
 	"github.com/dujiao-next/internal/logger"
 	"github.com/dujiao-next/internal/models"
@@ -67,6 +68,9 @@ func main() {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			stdLog.Printf("警告: 创建目录 %s 失败: %v", dir, err)
 		}
+	}
+	if err := catalogassets.Ensure("uploads"); err != nil {
+		stdLog.Printf("警告: 初始化商品分类图片失败: %v", err)
 	}
 
 	// 初始化数据库

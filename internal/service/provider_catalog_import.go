@@ -76,14 +76,10 @@ func (s *ProductMappingService) importProviderCatalogItem(connectionID uint, ite
 	if err != nil {
 		return false, false, err
 	}
-	if existing, lookupErr := s.mappingRepo.GetByConnectionAndUpstreamCode(connectionID, item.Code); lookupErr == nil && existing != nil {
-		if existingProduct, getErr := s.productRepo.GetByID(strconv.FormatUint(uint64(existing.LocalProductID), 10)); getErr == nil && existingProduct != nil {
-			// Keep previously downloaded covers. Downloading every TGX image inside
-			// the catalog request makes a large sync exceed the reverse-proxy timeout.
-			if len(existingProduct.Images) > 0 && strings.HasPrefix(strings.TrimSpace(existingProduct.Images[0]), "/uploads/") {
-				item.Images = []string(existingProduct.Images)
-			}
-		}
+	if imagePath := models.ProviderCatalogImagePath(platform); imagePath != "" {
+		item.Images = []string{imagePath}
+	} else {
+		item.Images = nil
 	}
 	price, cost, err := providerCatalogAmounts(item.Provider, item.UpstreamPrice, item.TargetPrice, conn)
 	if err != nil {
@@ -321,12 +317,19 @@ func (s *ProductMappingService) createProviderVariantSKU(
 		UpstreamPrice:    models.NewMoneyFromDecimal(upstreamPrice),
 		UpstreamStock:    variant.Stock,
 		UpstreamIsActive: variant.Active,
-		StockSyncedAt:    &now,
+		StockSyncedAt:    providerCatalogStockSyncedAt(item.Provider, variant.Stock, now),
 	}
 	if err := skuMappingRepo.Create(&skuMapping); err != nil {
 		return fmt.Errorf("create provider sku mapping: %w", err)
 	}
 	return nil
+}
+
+func providerCatalogStockSyncedAt(provider string, stock int, now time.Time) *time.Time {
+	if provider == upstream.CatalogProviderTGX && stock < 0 {
+		return nil
+	}
+	return &now
 }
 
 func (s *ProductMappingService) providerCatalogConnection(connectionID uint, provider string) (*models.SiteConnection, error) {

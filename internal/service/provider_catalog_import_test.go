@@ -136,6 +136,72 @@ func TestImportProviderCatalogCreatesProductsAndMappings(t *testing.T) {
 	}
 }
 
+func TestImportProviderCatalogUsesSharedCategoryImage(t *testing.T) {
+	db := setupProviderCatalogImportDB(t)
+	svc := NewProductMappingService(
+		repository.NewProductMappingRepository(db),
+		repository.NewSKUMappingRepository(db),
+		repository.NewProductRepository(db),
+		repository.NewProductSKURepository(db),
+		repository.NewCategoryRepository(db),
+		nil,
+	)
+
+	catalog := upstream.FilteredCatalog{TGX: []upstream.ProviderCatalogItem{{
+		Provider:      upstream.CatalogProviderTGX,
+		Code:          "FB-COVER-001",
+		Name:          "Facebook account",
+		Category:      "Facebook",
+		UpstreamPrice: "100.00",
+		TargetPrice:   "100.00",
+		Images:        []string{"https://upstream.example/cover.jpg"},
+		Active:        true,
+	}}}
+	if _, err := svc.ImportProviderCatalog(10, catalog); err != nil {
+		t.Fatalf("import catalog: %v", err)
+	}
+
+	var product models.Product
+	if err := db.Where("slug LIKE ?", "catalog-facebook-%").First(&product).Error; err != nil {
+		t.Fatalf("load product: %v", err)
+	}
+	if len(product.Images) != 1 || product.Images[0] != "/uploads/catalog/facebook.svg" {
+		t.Fatalf("images=%v, want shared Facebook cover", product.Images)
+	}
+}
+
+func TestCreateTGXCatalogVariantLeavesStockPending(t *testing.T) {
+	db := setupProviderCatalogImportDB(t)
+	svc := NewProductMappingService(
+		repository.NewProductMappingRepository(db),
+		repository.NewSKUMappingRepository(db),
+		repository.NewProductRepository(db),
+		repository.NewProductSKURepository(db),
+		repository.NewCategoryRepository(db),
+		nil,
+	)
+
+	catalog := upstream.FilteredCatalog{TGX: []upstream.ProviderCatalogItem{{
+		Provider:      upstream.CatalogProviderTGX,
+		Code:          "FB-STOCK-001",
+		Name:          "Facebook account",
+		Category:      "Facebook",
+		UpstreamPrice: "100.00",
+		TargetPrice:   "100.00",
+		Active:        true,
+	}}}
+	if _, err := svc.ImportProviderCatalog(10, catalog); err != nil {
+		t.Fatalf("import catalog: %v", err)
+	}
+	var skuMapping models.SKUMapping
+	if err := db.First(&skuMapping).Error; err != nil {
+		t.Fatalf("load SKU mapping: %v", err)
+	}
+	if skuMapping.UpstreamStock != -1 || skuMapping.StockSyncedAt != nil {
+		t.Fatalf("TGX catalog stock should be pending, got %+v", skuMapping)
+	}
+}
+
 func TestImportProviderCatalogRefreshesExistingMapping(t *testing.T) {
 	db := setupProviderCatalogImportDB(t)
 	svc := NewProductMappingService(
