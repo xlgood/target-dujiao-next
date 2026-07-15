@@ -99,7 +99,12 @@ func (s *ProductMappingService) LatestTGXInventorySyncRun(connectionID uint) (*m
 	if s == nil || s.tgxSyncRunRepo == nil {
 		return nil, nil
 	}
-	return s.tgxSyncRunRepo.Latest(connectionID)
+	run, err := s.tgxSyncRunRepo.Latest(connectionID)
+	if err != nil || run == nil || run.Status != "running" || run.StartedAt.IsZero() || time.Since(run.StartedAt) <= tgxInventorySyncTimeout {
+		return run, err
+	}
+	s.markTGXInventorySyncTimedOut(run)
+	return run, nil
 }
 
 func (s *ProductMappingService) ListTGXInventorySyncRuns(filter repository.TGXInventorySyncRunListFilter) ([]models.TGXInventorySyncRun, int64, error) {
