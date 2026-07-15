@@ -164,6 +164,61 @@ func ensureProviderCatalogImageRefreshMigration() error {
 	})
 }
 
+// ensureProviderCatalogPlatformCorrectionMigration repairs old records where
+// the single-letter X alias matched incidental text in a TikTok title.
+func ensureProviderCatalogPlatformCorrectionMigration() error {
+	if DB == nil {
+		return errors.New("database is not initialized")
+	}
+	var marker Setting
+	if err := DB.First(&marker, "key = ?", providerCatalogPlatformCorrectionMigrationKey).Error; err == nil && migrationDone(marker.ValueJSON) {
+		return nil
+	} else if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		return err
+	}
+
+	return DB.Transaction(func(tx *gorm.DB) error {
+		var tiktokCategory Category
+		if err := tx.Where("slug = ?", "platform-tiktok").First(&tiktokCategory).Error; err != nil {
+			if !errors.Is(err, gorm.ErrRecordNotFound) {
+				return err
+			}
+			tiktokCategory = Category{Slug: "platform-tiktok", NameJSON: JSON{"zh-CN": "tiktok", "zh-TW": "tiktok", "en-US": "tiktok"}, IsActive: true}
+			if err := tx.Create(&tiktokCategory).Error; err != nil {
+				return err
+			}
+		}
+		var rows []struct {
+			MappingID uint
+			ProductID uint
+			Title     JSON
+		}
+		if err := tx.Table("product_mappings pm").Select("pm.id AS mapping_id, p.id AS product_id, p.title_json AS title").
+			Joins("JOIN products p ON p.id = pm.local_product_id").Where("pm.platform = ? AND pm.deleted_at IS NULL", "x").Scan(&rows).Error; err != nil {
+			return err
+		}
+		for _, row := range rows {
+			matchedTikTok := false
+			for _, value := range row.Title {
+				if strings.Contains(strings.ToLower(fmt.Sprint(value)), "tiktok") || strings.Contains(strings.ToLower(fmt.Sprint(value)), "tik tok") {
+					matchedTikTok = true
+					break
+				}
+			}
+			if !matchedTikTok {
+				continue
+			}
+			if err := tx.Model(&ProductMapping{}).Where("id = ?", row.MappingID).Update("platform", "tiktok").Error; err != nil {
+				return err
+			}
+			if err := tx.Model(&Product{}).Where("id = ?", row.ProductID).Updates(map[string]interface{}{"category_id": tiktokCategory.ID, "images": StringArray{ProviderCatalogImagePath("tiktok")}}).Error; err != nil {
+				return err
+			}
+		}
+		return tx.Save(&Setting{Key: providerCatalogPlatformCorrectionMigrationKey, ValueJSON: JSON{"done": true, "migrated_at": time.Now().UTC().Format(time.RFC3339)}}).Error
+	})
+}
+
 // Existing provider catalog products were explicitly enabled by operators
 // before staged review existed, so retain their publication state on upgrade.
 func ensureProviderCatalogReviewMigration() error {

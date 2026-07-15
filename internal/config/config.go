@@ -345,8 +345,9 @@ func Load() *Config {
 	viper.SetDefault("queue.db", 1)
 	viper.SetDefault("queue.concurrency", 10)
 	viper.SetDefault("queue.queues", map[string]int{
-		"default":  10,
-		"critical": 5,
+		"default":   10,
+		"critical":  5,
+		"inventory": 1,
 	})
 	viper.SetDefault("upload.max_size", 10485760)
 	viper.SetDefault("upload.allowed_types", []string{

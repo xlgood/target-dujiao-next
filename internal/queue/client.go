@@ -132,6 +132,17 @@ func (c *Client) EnqueueNotificationDispatch(payload NotificationDispatchPayload
 	return err
 }
 
+// EnqueueUpstreamSyncStock sends a stock-only task to the dedicated inventory
+// queue. It is intentionally separate from procurement processing.
+func (c *Client) EnqueueUpstreamSyncStock(opts ...asynq.Option) error {
+	if !c.Enabled() {
+		return nil
+	}
+	options := append([]asynq.Option{asynq.Queue(constants.QueueInventory), asynq.MaxRetry(1)}, opts...)
+	_, err := c.client.Enqueue(NewUpstreamSyncStockTask(), options...)
+	return err
+}
+
 // EnqueueProcurementSubmit 推送采购提交任务
 func (c *Client) EnqueueProcurementSubmit(payload ProcurementSubmitPayload, opts ...asynq.Option) error {
 	if !c.Enabled() {

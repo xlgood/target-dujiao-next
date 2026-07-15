@@ -103,7 +103,7 @@ func main() {
 
 	// 解析命令行参数
 	var mode string
-	flag.StringVar(&mode, "mode", app.ModeAll, "启动模式: all (默认), api, worker")
+	flag.StringVar(&mode, "mode", app.ModeAll, "启动模式: all (默认), api, worker, inventory-worker")
 	flag.Parse()
 
 	if err := app.Run(app.Options{

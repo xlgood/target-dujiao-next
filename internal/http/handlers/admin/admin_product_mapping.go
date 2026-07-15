@@ -132,6 +132,19 @@ func (h *Handler) GetTGXInventorySyncHealth(c *gin.Context) {
 	response.Success(c, run)
 }
 
+// SyncTGXInventoryAll queues a rate-limited refresh for every mapped TGX SKU.
+func (h *Handler) SyncTGXInventoryAll(c *gin.Context) {
+	if h.QueueClient == nil || !h.QueueClient.Enabled() {
+		shared.RespondError(c, response.CodeInternal, "error.tgx_inventory_refresh_failed", nil)
+		return
+	}
+	if err := h.QueueClient.EnqueueUpstreamSyncStock(); err != nil {
+		shared.RespondError(c, response.CodeInternal, "error.tgx_inventory_refresh_failed", err)
+		return
+	}
+	response.Success(c, gin.H{"queued": true})
+}
+
 // GetProductMapping 获取商品映射详情
 func (h *Handler) GetProductMapping(c *gin.Context) {
 	id, err := shared.ParseParamUint(c, "id")

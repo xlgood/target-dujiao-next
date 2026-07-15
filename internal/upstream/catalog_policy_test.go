@@ -14,6 +14,7 @@ func TestNormalizePlatformAliases(t *testing.T) {
 		{name: "twitter", text: "Twitter / X Followers", want: "x"},
 		{name: "instagram", text: "IG aged accounts", want: "instagram"},
 		{name: "tiktok", text: "Tik Tok views", want: "tiktok"},
+		{name: "tiktok wins over incidental x", text: "TikTok account with X verification", want: "tiktok"},
 		{name: "facebook", text: "FB page likes", want: "facebook"},
 		{name: "youtube", text: "YT subscribers", want: "youtube"},
 	}

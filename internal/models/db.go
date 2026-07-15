@@ -23,6 +23,7 @@ const (
 	fansGurusPriceBasisMigrationSettingKey          = "migration/fansgurus_price_basis_v1"
 	providerCatalogImageMigrationSettingKey         = "migration/provider_catalog_images_v3"
 	providerCatalogImageRefreshMigrationSettingKey  = "migration/provider_catalog_images_v4"
+	providerCatalogPlatformCorrectionMigrationKey   = "migration/provider_catalog_platform_correction_v1"
 	tgxUnknownStockMigrationSettingKey              = "migration/tgx_unknown_stock_v1"
 	catalogReviewMigrationSettingKey                = "migration/provider_catalog_review_v1"
 	catalogReviewCorrectionMigrationSettingKey      = "migration/provider_catalog_review_v2"
@@ -210,6 +211,9 @@ func AutoMigrate() error {
 		return err
 	}
 	if err := ensureProviderCatalogImageRefreshMigration(); err != nil {
+		return err
+	}
+	if err := ensureProviderCatalogPlatformCorrectionMigration(); err != nil {
 		return err
 	}
 	if err := ensureProviderCatalogReviewMigration(); err != nil {

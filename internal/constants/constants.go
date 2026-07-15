@@ -333,6 +333,7 @@ const (
 // 队列常量
 const (
 	QueueDefault                    = "default"
+	QueueInventory                  = "inventory"
 	TaskOrderStatusEmail            = "order:status_email"
 	TaskOrderAutoFulfill            = "order:auto_fulfill"
 	TaskOrderTimeoutCancel          = "order:timeout_cancel"

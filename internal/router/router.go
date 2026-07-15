@@ -547,6 +547,7 @@ func SetupRouter(cfg *config.Config, c *provider.Container) *gin.Engine {
 				// 商品映射管理
 				authorized.GET("/product-mappings", adminHandler.GetProductMappings)
 				authorized.GET("/product-mappings/tgx-inventory-health", adminHandler.GetTGXInventorySyncHealth)
+				authorized.POST("/product-mappings/tgx-inventory/sync", adminHandler.SyncTGXInventoryAll)
 				authorized.GET("/product-mappings/tgx-inventory-runs", adminHandler.ListTGXInventorySyncRuns)
 				authorized.GET("/product-mappings/tgx-inventory-runs/:id/failed-items.csv", adminHandler.ExportTGXInventorySyncRunFailures)
 				authorized.GET("/product-mappings/:id", adminHandler.GetProductMapping)

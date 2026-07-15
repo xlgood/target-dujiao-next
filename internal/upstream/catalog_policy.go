@@ -19,9 +19,9 @@ var (
 	facelookRE = regexp.MustCompile(`(?i)\bfacelook\b`)
 
 	platformOrder = []string{
-		"x", "instagram", "facebook", "tiktok", "youtube", "vk", "spotify",
+		"instagram", "facebook", "tiktok", "youtube", "vk", "spotify",
 		"discord", "twitch", "reddit", "linkedin", "github", "quora", "whatsapp",
-		"line-voom", "threads", "gmail", "outlook", "hotmail", "overseas-email",
+		"line-voom", "threads", "gmail", "outlook", "hotmail", "overseas-email", "x",
 	}
 
 	platformAliases = map[string][]string{

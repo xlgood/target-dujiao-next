@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	"github.com/dujiao-next/internal/config"
+	"github.com/dujiao-next/internal/constants"
 	"github.com/dujiao-next/internal/logger"
 	"github.com/dujiao-next/internal/queue"
 	"github.com/dujiao-next/internal/service"
@@ -44,6 +45,53 @@ func NewService(cfg *config.QueueConfig, consumer *Consumer) (*Service, error) {
 		scheduler: scheduler,
 		consumer:  consumer,
 	}, nil
+}
+
+// NewInventoryService consumes only stock-sync tasks and schedules only stock
+// refreshes. It never registers procurement or order-processing handlers.
+func NewInventoryService(cfg *config.QueueConfig, consumer *Consumer) (*Service, error) {
+	if cfg == nil || !cfg.Enabled {
+		return nil, errors.New("queue disabled")
+	}
+	if consumer == nil || consumer.ProductMappingService == nil {
+		return nil, errors.New("inventory consumer is not initialized")
+	}
+	opt, serverCfg := queue.BuildServerConfig(cfg)
+	serverCfg.Concurrency = 1
+	serverCfg.Queues = map[string]int{constants.QueueInventory: 1}
+	server := asynq.NewServer(opt, serverCfg)
+	mux := asynq.NewServeMux()
+	mux.HandleFunc(queue.TaskUpstreamSyncStock, withPanicRecovery(queue.TaskUpstreamSyncStock, consumer.handleUpstreamSyncStock))
+
+	scheduler := asynq.NewScheduler(opt, nil)
+	registerInventoryPeriodicTask(scheduler, consumer, cfg)
+	// Seed the first refresh immediately; subsequent runs are scheduled below.
+	client := asynq.NewClient(opt)
+	if _, err := client.Enqueue(queue.NewUpstreamSyncStockTask(), asynq.Queue(constants.QueueInventory), asynq.MaxRetry(1)); err != nil {
+		_ = client.Close()
+		return nil, err
+	}
+	_ = client.Close()
+	return &Service{name: "inventory-worker", server: server, mux: mux, scheduler: scheduler, consumer: consumer}, nil
+}
+
+func registerInventoryPeriodicTask(scheduler *asynq.Scheduler, consumer *Consumer, cfg *config.QueueConfig) {
+	if scheduler == nil || consumer == nil || consumer.ProductMappingService == nil {
+		return
+	}
+	fallbackInterval := "5m"
+	if cfg != nil && cfg.UpstreamSyncInterval != "" {
+		fallbackInterval = cfg.UpstreamSyncInterval
+	}
+	syncInterval := fallbackInterval
+	if consumer.SettingService != nil {
+		if d, err := consumer.SettingService.GetUpstreamSyncInterval(fallbackInterval); err == nil && d > 0 {
+			syncInterval = service.FormatUpstreamSyncIntervalForScheduler(d)
+		}
+	}
+	if _, err := scheduler.Register("@every "+syncInterval, queue.NewUpstreamSyncStockTask(), asynq.Queue(constants.QueueInventory)); err != nil {
+		logger.Warnw("scheduler_register_inventory_sync_failed", "error", err)
+	}
 }
 
 // registerPeriodicTasks 注册所有周期性任务

@@ -73,6 +73,14 @@ func (h *Handler) SyncProviderCatalog(c *gin.Context) {
 		shared.RespondError(c, response.CodeInternal, "error.bad_request", err)
 		return
 	}
+	if h.QueueClient == nil || !h.QueueClient.Enabled() {
+		shared.RespondError(c, response.CodeInternal, "error.tgx_inventory_refresh_failed", nil)
+		return
+	}
+	if err := h.QueueClient.EnqueueUpstreamSyncStock(); err != nil {
+		shared.RespondError(c, response.CodeInternal, "error.tgx_inventory_refresh_failed", err)
+		return
+	}
 
 	response.Success(c, result)
 }
