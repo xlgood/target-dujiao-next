@@ -88,6 +88,29 @@ func createManualSKU(t *testing.T, db *gorm.DB, productID uint, code string, tot
 	return sku
 }
 
+func TestListExcludesProviderCatalogExcludedCategoryWhenRequested(t *testing.T) {
+	repo, db := setupProductRepositoryTest(t)
+	excludedCategory := &models.Category{Slug: "provider-catalog-excluded", NameJSON: models.JSON{"zh-CN": "已排除目录"}, IsActive: false}
+	if err := db.Create(excludedCategory).Error; err != nil {
+		t.Fatalf("create excluded category: %v", err)
+	}
+
+	visible := createManualProduct(t, repo, "visible-product", 1, 0, 0)
+	excluded := createManualProduct(t, repo, "excluded-product", 1, 0, 0)
+	excluded.CategoryID = excludedCategory.ID
+	if err := repo.Update(excluded); err != nil {
+		t.Fatalf("move excluded product: %v", err)
+	}
+
+	rows, total, err := repo.List(ProductListFilter{Page: 1, PageSize: 20, ExcludeProviderCatalogExcluded: true})
+	if err != nil {
+		t.Fatalf("list products: %v", err)
+	}
+	if total != 1 || len(rows) != 1 || rows[0].ID != visible.ID {
+		t.Fatalf("rows=%+v total=%d, want only visible product %d", rows, total, visible.ID)
+	}
+}
+
 func createAutoProduct(t *testing.T, repo *GormProductRepository, slug string) *models.Product {
 	t.Helper()
 	product := &models.Product{

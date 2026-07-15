@@ -261,16 +261,17 @@ func (s *ProductService) GetPublicBySlugForTenant(tenant TenantContext, reseller
 // ListAdmin 获取后台商品列表
 func (s *ProductService) ListAdmin(categoryID, search, fulfillmentType, stockStatus string, hasWholesalePrices *bool, lowStockThreshold int, page, pageSize int) ([]models.Product, int64, error) {
 	filter := repository.ProductListFilter{
-		Page:               page,
-		PageSize:           pageSize,
-		CategoryID:         categoryID,
-		Search:             search,
-		FulfillmentType:    strings.TrimSpace(fulfillmentType),
-		StockStatus:        normalizeStockStatus(stockStatus),
-		HasWholesalePrices: hasWholesalePrices,
-		LowStockThreshold:  lowStockThreshold,
-		OnlyActive:         false,
-		WithCategory:       true,
+		Page:                           page,
+		PageSize:                       pageSize,
+		CategoryID:                     categoryID,
+		Search:                         search,
+		FulfillmentType:                strings.TrimSpace(fulfillmentType),
+		StockStatus:                    normalizeStockStatus(stockStatus),
+		HasWholesalePrices:             hasWholesalePrices,
+		LowStockThreshold:              lowStockThreshold,
+		OnlyActive:                     false,
+		WithCategory:                   true,
+		ExcludeProviderCatalogExcluded: true,
 	}
 	return s.repo.List(filter)
 }

@@ -122,7 +122,6 @@ func BuiltinRoleSeeds() []RoleSeed {
 				{Object: "/admin/site-connections/:id", Action: "*"},
 				{Object: "/admin/site-connections/:id/ping", Action: "POST"},
 				{Object: "/admin/site-connections/:id/status", Action: "PUT"},
-				{Object: "/admin/site-connections/:id/reapply-markup", Action: "POST"},
 				{Object: "/admin/provider-catalog/sync", Action: "POST"},
 				{Object: "/admin/product-mappings", Action: "*"},
 				{Object: "/admin/product-mappings/:id", Action: "*"},

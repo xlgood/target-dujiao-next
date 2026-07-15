@@ -109,61 +109,6 @@ func TestSiteConnectionServiceCheckActiveBalancesRecordsLowBalance(t *testing.T)
 	}
 }
 
-type fakeMarkupReapplier struct {
-	calls []uint
-}
-
-func (f *fakeMarkupReapplier) ReapplyMarkup(connectionID uint) (int, error) {
-	f.calls = append(f.calls, connectionID)
-	return 0, nil
-}
-
-func newReapplyTestConn() *models.SiteConnection {
-	return &models.SiteConnection{
-		ID:                 7,
-		Name:               "conn",
-		BaseURL:            "https://up.example.com",
-		ApiKey:             "key",
-		Protocol:           "dujiao-next",
-		Status:             constants.ConnectionStatusActive,
-		ExchangeRate:       decimal.NewFromInt(1),
-		PriceMarkupPercent: decimal.Zero,
-		PriceRoundingMode:  "none",
-	}
-}
-
-func TestSiteConnectionServiceUpdateTriggersReapplyWhenExchangeRateChanges(t *testing.T) {
-	repo := &siteConnectionRepoStub{conn: newReapplyTestConn()}
-	svc := NewSiteConnectionService(repo, "test-secret-key", t.TempDir())
-	reapplier := &fakeMarkupReapplier{}
-	svc.SetMarkupReapplier(reapplier)
-
-	rate := 6.9
-	if _, err := svc.Update(7, UpdateConnectionInput{ExchangeRate: &rate}); err != nil {
-		t.Fatalf("update failed: %v", err)
-	}
-	if len(reapplier.calls) != 1 || reapplier.calls[0] != 7 {
-		t.Fatalf("expected reapply called once for conn 7, got %#v", reapplier.calls)
-	}
-}
-
-func TestSiteConnectionServiceUpdateSkipsReapplyWhenPriceConfigUnchanged(t *testing.T) {
-	repo := &siteConnectionRepoStub{conn: newReapplyTestConn()}
-	svc := NewSiteConnectionService(repo, "test-secret-key", t.TempDir())
-	reapplier := &fakeMarkupReapplier{}
-	svc.SetMarkupReapplier(reapplier)
-
-	// 只改名字，汇率传入与现值相同的 1 → 定价配置未变，不应触发重算。
-	name := "renamed"
-	rate := 1.0
-	if _, err := svc.Update(7, UpdateConnectionInput{Name: name, ExchangeRate: &rate}); err != nil {
-		t.Fatalf("update failed: %v", err)
-	}
-	if len(reapplier.calls) != 0 {
-		t.Fatalf("expected no reapply when price config unchanged, got %#v", reapplier.calls)
-	}
-}
-
 type siteConnectionRepoStub struct {
 	conn    *models.SiteConnection
 	updated bool

@@ -76,6 +76,11 @@ func (r *GormProductRepository) List(filter ProductListFilter) ([]models.Product
 	if len(filter.ExcludeProductIDs) > 0 {
 		query = query.Where("products.id NOT IN ?", filter.ExcludeProductIDs)
 	}
+	if filter.ExcludeProviderCatalogExcluded {
+		// Retain excluded mappings for audit and order history, but keep them out
+		// of the default operations list after a provider policy change.
+		query = query.Where("NOT EXISTS (SELECT 1 FROM categories c WHERE c.id = products.category_id AND c.slug = ? AND c.deleted_at IS NULL)", "provider-catalog-excluded")
+	}
 	if fulfillmentType := strings.TrimSpace(filter.FulfillmentType); fulfillmentType != "" {
 		query = query.Where("fulfillment_type = ?", fulfillmentType)
 	}

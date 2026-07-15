@@ -22,6 +22,7 @@ const (
 	orderItemOriginalPriceMigrationKey              = "migration/order_item_original_price_v1"
 	fansGurusPriceBasisMigrationSettingKey          = "migration/fansgurus_price_basis_v1"
 	providerCatalogImageMigrationSettingKey         = "migration/provider_catalog_images_v3"
+	providerCatalogImageRefreshMigrationSettingKey  = "migration/provider_catalog_images_v4"
 	tgxUnknownStockMigrationSettingKey              = "migration/tgx_unknown_stock_v1"
 	catalogReviewMigrationSettingKey                = "migration/provider_catalog_review_v1"
 	catalogReviewCorrectionMigrationSettingKey      = "migration/provider_catalog_review_v2"
@@ -206,6 +207,9 @@ func AutoMigrate() error {
 		return err
 	}
 	if err := ensureProviderCatalogImageMigration(); err != nil {
+		return err
+	}
+	if err := ensureProviderCatalogImageRefreshMigration(); err != nil {
 		return err
 	}
 	if err := ensureProviderCatalogReviewMigration(); err != nil {

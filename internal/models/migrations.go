@@ -133,6 +133,37 @@ func ensureProviderCatalogImageMigration() error {
 	})
 }
 
+// ensureProviderCatalogImageRefreshMigration assigns covers added after the
+// initial shared-image migration to existing provider catalog products.
+func ensureProviderCatalogImageRefreshMigration() error {
+	if DB == nil {
+		return errors.New("database is not initialized")
+	}
+	var marker Setting
+	if err := DB.First(&marker, "key = ?", providerCatalogImageRefreshMigrationSettingKey).Error; err == nil && migrationDone(marker.ValueJSON) {
+		return nil
+	} else if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		return err
+	}
+
+	return DB.Transaction(func(tx *gorm.DB) error {
+		var mappings []ProductMapping
+		if err := tx.Where("provider IN ? AND deleted_at IS NULL", []string{"tgx", "fansgurus"}).Find(&mappings).Error; err != nil {
+			return err
+		}
+		for _, mapping := range mappings {
+			if err := tx.Model(&Product{}).Where("id = ?", mapping.LocalProductID).
+				Update("images", StringArray{ProviderCatalogImagePath(mapping.Platform)}).Error; err != nil {
+				return err
+			}
+		}
+		return tx.Save(&Setting{
+			Key:       providerCatalogImageRefreshMigrationSettingKey,
+			ValueJSON: JSON{"done": true, "migrated_at": time.Now().UTC().Format(time.RFC3339)},
+		}).Error
+	})
+}
+
 // Existing provider catalog products were explicitly enabled by operators
 // before staged review existed, so retain their publication state on upgrade.
 func ensureProviderCatalogReviewMigration() error {

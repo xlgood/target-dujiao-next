@@ -15,19 +15,20 @@ type Pagination struct {
 
 // ProductListFilter 查询商品列表的过滤条件
 type ProductListFilter struct {
-	Page               int
-	PageSize           int
-	CategoryID         string
-	CategoryIDs        []uint
-	ExcludeProductIDs  []uint
-	Search             string
-	FulfillmentType    string
-	StockStatus        string
-	HasWholesalePrices *bool
-	LowStockThreshold  int // 低库存阈值
-	OnlyActive         bool
-	WithCategory       bool
-	UpdatedAfter       *time.Time // 仅返回此时间之后更新的商品
+	Page                           int
+	PageSize                       int
+	CategoryID                     string
+	CategoryIDs                    []uint
+	ExcludeProductIDs              []uint
+	Search                         string
+	FulfillmentType                string
+	StockStatus                    string
+	HasWholesalePrices             *bool
+	LowStockThreshold              int // 低库存阈值
+	OnlyActive                     bool
+	WithCategory                   bool
+	ExcludeProviderCatalogExcluded bool
+	UpdatedAfter                   *time.Time // 仅返回此时间之后更新的商品
 }
 
 // PostListFilter 查询文章列表的过滤条件

@@ -537,7 +537,6 @@ func SetupRouter(cfg *config.Config, c *provider.Container) *gin.Engine {
 				authorized.DELETE("/site-connections/:id", adminHandler.DeleteSiteConnection)
 				authorized.POST("/site-connections/:id/ping", adminHandler.PingSiteConnection)
 				authorized.PUT("/site-connections/:id/status", adminHandler.UpdateSiteConnectionStatus)
-				authorized.POST("/site-connections/:id/reapply-markup", adminHandler.ReapplyConnectionMarkup)
 				authorized.GET("/site-connections/balance-snapshots", adminHandler.ListProviderBalanceSnapshots)
 
 				// Provider 商品目录同步

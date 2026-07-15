@@ -10,7 +10,11 @@ import (
 //go:embed *.svg
 var files embed.FS
 
-var platforms = []string{"facebook", "instagram", "tiktok", "youtube", "x", "social"}
+var platforms = []string{
+	"facebook", "instagram", "tiktok", "youtube", "x", "vk", "spotify", "discord", "twitch", "reddit",
+	"linkedin", "github", "quora", "whatsapp", "line-voom", "threads", "gmail", "outlook", "hotmail",
+	"overseas-email", "social",
+}
 
 // Ensure writes a fixed set of category covers into the persistent uploads
 // volume. Existing files are left unchanged so deployments are idempotent.

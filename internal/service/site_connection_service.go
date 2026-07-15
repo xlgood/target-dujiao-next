@@ -21,12 +21,6 @@ var (
 	ErrConnectionInvalid  = errors.New("site connection is invalid")
 )
 
-// MarkupReapplier 在连接定价配置（汇率/加价/取整）变更后，按新配置重算该连接已映射商品的本地售价。
-// 由 ProductMappingService 实现，通过 setter 注入以避免与本服务的循环依赖。
-type MarkupReapplier interface {
-	ReapplyMarkup(connectionID uint) (int, error)
-}
-
 // SiteConnectionService 对接连接服务
 type SiteConnectionService struct {
 	connRepo            repository.SiteConnectionRepository
@@ -34,7 +28,6 @@ type SiteConnectionService struct {
 	notificationSvc     *NotificationService
 	encryptKey          []byte
 	uploadsDir          string
-	markupReapplier     MarkupReapplier
 }
 
 // NewSiteConnectionService 创建连接服务
@@ -44,11 +37,6 @@ func NewSiteConnectionService(connRepo repository.SiteConnectionRepository, appS
 		encryptKey: crypto.DeriveKey(appSecretKey),
 		uploadsDir: uploadsDir,
 	}
-}
-
-// SetMarkupReapplier 注入定价重算器（容器装配时调用）。
-func (s *SiteConnectionService) SetMarkupReapplier(r MarkupReapplier) {
-	s.markupReapplier = r
 }
 
 func (s *SiteConnectionService) SetBalanceSnapshotRepository(repo repository.ProviderBalanceSnapshotRepository) {
@@ -170,11 +158,6 @@ func (s *SiteConnectionService) Update(id uint, input UpdateConnectionInput) (*m
 		return nil, ErrConnectionNotFound
 	}
 
-	// 记录定价配置旧值，用于判断本次保存是否需要重算已映射商品的本地售价。
-	prevExchangeRate := conn.ExchangeRate
-	prevMarkupPercent := conn.PriceMarkupPercent
-	prevRoundingMode := conn.PriceRoundingMode
-
 	if strings.TrimSpace(input.Name) != "" {
 		conn.Name = strings.TrimSpace(input.Name)
 	}
@@ -225,19 +208,6 @@ func (s *SiteConnectionService) Update(id uint, input UpdateConnectionInput) (*m
 
 	if err := s.connRepo.Update(conn); err != nil {
 		return nil, err
-	}
-
-	// 定价配置（汇率/加价/取整）发生实际变化时，自动重算该连接已映射商品的本地售价，
-	// 避免「改了汇率但已有商品价格不联动」。重算为尽力而为：失败不影响连接保存本身，
-	// 仅记录告警，用户仍可通过「重新应用加价」手动补救。
-	priceConfigChanged := !conn.ExchangeRate.Equal(prevExchangeRate) ||
-		!conn.PriceMarkupPercent.Equal(prevMarkupPercent) ||
-		conn.PriceRoundingMode != prevRoundingMode
-	if priceConfigChanged && s.markupReapplier != nil {
-		if _, err := s.markupReapplier.ReapplyMarkup(conn.ID); err != nil {
-			logger.Warnw("reapply_markup_after_connection_update_failed",
-				"connection_id", conn.ID, "error", err)
-		}
 	}
 
 	return conn, nil

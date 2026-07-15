@@ -494,6 +494,7 @@ func (h *Handler) applyUpstreamDisplayTypes(products []models.Product) {
 			continue
 		}
 		p := &products[idx]
+		p.UpstreamStockManaged = true
 
 		displayType := mp.UpstreamFulfillmentType
 		if displayType != constants.FulfillmentTypeAuto {
@@ -535,12 +536,6 @@ func (h *Handler) applyUpstreamDisplayTypes(products []models.Product) {
 				totalStock += int64(max(sm.UpstreamStock, 0))
 			}
 
-			if displayType == constants.FulfillmentTypeAuto {
-				sku.AutoStockAvailable = int64(max(sm.UpstreamStock, 0))
-				sku.AutoStockTotal = int64(max(sm.UpstreamStock, 0))
-			} else {
-				sku.ManualStockTotal = max(sm.UpstreamStock, 0)
-			}
 		}
 
 		// 填充商品级汇总库存
@@ -548,19 +543,10 @@ func (h *Handler) applyUpstreamDisplayTypes(products []models.Product) {
 			p.UpstreamStockUnknown = true
 			continue
 		}
-		if displayType == constants.FulfillmentTypeAuto {
-			if hasUnlimited {
-				p.AutoStockAvailable = -1
-			} else {
-				p.AutoStockAvailable = totalStock
-				p.AutoStockTotal = totalStock
-			}
+		if hasUnlimited {
+			p.UpstreamStockAvailable = -1
 		} else {
-			if hasUnlimited {
-				p.ManualStockTotal = constants.ManualStockUnlimited
-			} else {
-				p.ManualStockTotal = int(totalStock)
-			}
+			p.UpstreamStockAvailable = totalStock
 		}
 	}
 }

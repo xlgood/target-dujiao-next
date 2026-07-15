@@ -344,7 +344,6 @@ func (c *Container) initServices() {
 	c.ProductMappingService.SetProviderCatalogSyncRunRepository(c.ProviderCatalogSyncRunRepo)
 	c.ProductMappingService.SetTGXInventorySyncRunRepository(c.TGXInventorySyncRunRepo)
 	c.ProductMappingService.SetNotificationService(c.NotificationService)
-	c.SiteConnectionService.SetMarkupReapplier(c.ProductMappingService)
 	c.OrderService.SetProductMappingService(c.ProductMappingService)
 	c.DownstreamCallbackService = service.NewDownstreamCallbackService(c.DownstreamOrderRefRepo, c.OrderRepo, c.ApiCredentialRepo, c.QueueClient)
 	c.PaymentService = service.NewPaymentService(service.PaymentServiceOptions{

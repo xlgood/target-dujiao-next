@@ -262,3 +262,37 @@ func TestUpdateProductWholesalePricesHandlerReturnsNotFound(t *testing.T) {
 		t.Fatalf("expected product not found response, got body=%s", w.Body.String())
 	}
 }
+
+func TestApplyUpstreamDisplayTypesKeepsUpstreamStockSeparateFromManualStock(t *testing.T) {
+	h, db := setupAdminProductHandlerTest(t)
+	h.ProductMappingRepo = repository.NewProductMappingRepository(db)
+	h.SKUMappingRepo = repository.NewSKUMappingRepository(db)
+
+	product := models.Product{
+		CategoryID: 1, Slug: "tgx-stock-product", TitleJSON: models.JSON{"zh-CN": "TGX"},
+		PriceAmount: models.NewMoneyFromDecimal(decimal.NewFromInt(10)), FulfillmentType: constants.FulfillmentTypeUpstream,
+	}
+	if err := db.Create(&product).Error; err != nil {
+		t.Fatalf("create product: %v", err)
+	}
+	sku := models.ProductSKU{ProductID: product.ID, SKUCode: "TGX-1", PriceAmount: models.NewMoneyFromDecimal(decimal.NewFromInt(10)), ManualStockTotal: 0, IsActive: true}
+	if err := db.Create(&sku).Error; err != nil {
+		t.Fatalf("create sku: %v", err)
+	}
+	mapping := models.ProductMapping{ConnectionID: 1, LocalProductID: product.ID, Provider: "tgx", UpstreamFulfillmentType: constants.FulfillmentTypeManual, IsActive: true}
+	if err := db.Create(&mapping).Error; err != nil {
+		t.Fatalf("create mapping: %v", err)
+	}
+	now := time.Now()
+	if err := db.Create(&models.SKUMapping{ProductMappingID: mapping.ID, LocalSKUID: sku.ID, UpstreamStock: 27, UpstreamIsActive: true, StockSyncedAt: &now}).Error; err != nil {
+		t.Fatalf("create sku mapping: %v", err)
+	}
+
+	product.SKUs = []models.ProductSKU{sku}
+	products := []models.Product{product}
+	h.applyUpstreamDisplayTypes(products)
+	got := products[0]
+	if !got.UpstreamStockManaged || got.UpstreamStockAvailable != 27 || got.ManualStockTotal != 0 || got.SKUs[0].ManualStockTotal != 0 {
+		t.Fatalf("upstream stock must not masquerade as manual stock: %+v", got)
+	}
+}

@@ -140,27 +140,6 @@ func (h *Handler) PingSiteConnection(c *gin.Context) {
 	response.Success(c, result)
 }
 
-// ReapplyConnectionMarkup 对连接的所有映射商品重新应用加价规则
-func (h *Handler) ReapplyConnectionMarkup(c *gin.Context) {
-	id, err := shared.ParseParamUint(c, "id")
-	if err != nil {
-		shared.RespondError(c, response.CodeBadRequest, "error.bad_request", err)
-		return
-	}
-
-	count, err := h.ProductMappingService.ReapplyMarkup(id)
-	if err != nil {
-		if errors.Is(err, service.ErrConnectionNotFound) {
-			shared.RespondError(c, response.CodeNotFound, "error.connection_not_found", nil)
-			return
-		}
-		shared.RespondError(c, response.CodeInternal, "error.reapply_markup_failed", err)
-		return
-	}
-
-	response.Success(c, gin.H{"updated_products": count})
-}
-
 // UpdateSiteConnectionStatusRequest 更新连接状态请求
 type UpdateSiteConnectionStatusRequest struct {
 	Status string `json:"status" binding:"required"`
