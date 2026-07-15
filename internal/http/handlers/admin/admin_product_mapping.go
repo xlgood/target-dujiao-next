@@ -138,11 +138,15 @@ func (h *Handler) SyncTGXInventoryAll(c *gin.Context) {
 		shared.RespondError(c, response.CodeInternal, "error.tgx_inventory_refresh_failed", nil)
 		return
 	}
+	if h.ProductMappingService != nil && h.ProductMappingService.IsUpstreamStockSyncRunning() {
+		response.Success(c, gin.H{"queued": false, "running": true})
+		return
+	}
 	if err := h.QueueClient.EnqueueUpstreamSyncStock(); err != nil {
 		shared.RespondError(c, response.CodeInternal, "error.tgx_inventory_refresh_failed", err)
 		return
 	}
-	response.Success(c, gin.H{"queued": true})
+	response.Success(c, gin.H{"queued": true, "running": false})
 }
 
 // GetProductMapping 获取商品映射详情

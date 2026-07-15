@@ -24,6 +24,7 @@ func TestIsTGXUnavailableInventoryError(t *testing.T) {
 		{name: "typed", err: upstream.ErrTGXUnavailable, want: true},
 		{name: "wrapped message", err: errors.New("tgx request failed: code=0: 当前商品已停售"), want: true},
 		{name: "temporary out of stock", err: errors.New("tgx request failed: code=0: 该商品暂时缺货，请稍后再来"), want: true},
+		{name: "product does not exist", err: errors.New("tgx request failed: code=0: 商品不存在"), want: true},
 		{name: "transport failure", err: errors.New("send tgx request: context deadline exceeded"), want: false},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {

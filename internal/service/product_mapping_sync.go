@@ -293,13 +293,25 @@ func (s *ProductMappingService) markUpstreamUnavailable(mapping *models.ProductM
 	return nil
 }
 
+const upstreamStockSyncLockKey = "upstream:sync_stock_running"
+
+// IsUpstreamStockSyncRunning reports whether an inventory refresh currently
+// owns the distributed lock. Redis failures intentionally return false so an
+// operator can still submit a refresh instead of receiving a false busy state.
+func (s *ProductMappingService) IsUpstreamStockSyncRunning() bool {
+	if !cache.Enabled() {
+		return false
+	}
+	value, err := cache.GetString(context.Background(), upstreamStockSyncLockKey)
+	return err == nil && value != ""
+}
+
 // SyncAllStock 同步所有活跃映射的库存（供定时任务调用）
 // 使用 Redis 锁防止任务重叠执行，并发调用上游 API 提升吞吐量
 func (s *ProductMappingService) SyncAllStock(cfg UpstreamSyncConfig) error {
 	ctx := context.Background()
-	const lockKey = "upstream:sync_stock_running"
 
-	locked, err := cache.SetNX(ctx, lockKey, "1", 30*time.Minute)
+	locked, err := cache.SetNX(ctx, upstreamStockSyncLockKey, "1", 30*time.Minute)
 	if err != nil {
 		logger.Warnw("sync_stock_lock_error", "error", err)
 		// Redis 不可用时降级为直接执行
@@ -307,7 +319,7 @@ func (s *ProductMappingService) SyncAllStock(cfg UpstreamSyncConfig) error {
 		logger.Debugw("sync_stock_skip_already_running")
 		return nil
 	}
-	defer cache.Del(ctx, lockKey)
+	defer cache.Del(ctx, upstreamStockSyncLockKey)
 
 	mappings, err := s.mappingRepo.ListAllActive()
 	if err != nil {
@@ -947,6 +959,8 @@ func isTGXUnavailableInventoryError(err error) bool {
 	}
 	message := strings.ToLower(err.Error())
 	return strings.Contains(message, "停售") ||
+		strings.Contains(message, "商品不存在") ||
+		strings.Contains(message, "product not found") ||
 		strings.Contains(message, "暂时缺货") ||
 		strings.Contains(message, "缺货") ||
 		strings.Contains(message, "out of stock") ||
