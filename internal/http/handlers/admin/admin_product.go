@@ -245,6 +245,10 @@ func (h *Handler) CreateProduct(c *gin.Context) {
 			shared.RespondError(c, response.CodeBadRequest, "error.product_category_invalid", nil)
 			return
 		}
+		if errors.Is(err, service.ErrProductCatalogReviewRequired) {
+			shared.RespondErrorWithMsg(c, response.CodeBadRequest, err.Error(), nil)
+			return
+		}
 		if errors.Is(err, service.ErrFulfillmentInvalid) {
 			shared.RespondError(c, response.CodeBadRequest, "error.fulfillment_invalid", nil)
 			return
@@ -589,6 +593,8 @@ func productBatchFailureFromError(locale string, id uint, err error) batchProduc
 	switch {
 	case errors.Is(err, service.ErrProductCategoryInvalid):
 		errorCode = "product_category_invalid"
+	case errors.Is(err, service.ErrProductCatalogReviewRequired):
+		errorCode = "product_catalog_review_required"
 	case errors.Is(err, service.ErrNotFound):
 		errorCode = "product_not_found"
 	}

@@ -27,6 +27,7 @@ type ProductMapping struct {
 	UpstreamProductCode     string         `gorm:"type:varchar(128);index" json:"upstream_product_code"`
 	Provider                string         `gorm:"type:varchar(32);index" json:"provider"`
 	Platform                string         `gorm:"type:varchar(32);index" json:"platform"`
+	PlatformLocked          bool           `gorm:"not null;default:false" json:"platform_locked"`
 	CatalogReviewStatus     string         `gorm:"type:varchar(16);not null;default:'pending';index" json:"catalog_review_status"`
 	UpstreamFulfillmentType string         `gorm:"type:varchar(20);not null;default:'manual'" json:"upstream_fulfillment_type"` // 上游原始交付类型（auto/manual）
 	UpstreamStatus          string         `gorm:"type:varchar(16);not null;default:'active';index" json:"upstream_status"`     // 上游商品状态：active/inactive/deleted

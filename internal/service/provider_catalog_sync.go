@@ -61,7 +61,11 @@ func (s *ProductMappingService) SyncProviderCatalogWithClients(
 		s.recordProviderCatalogSyncRun(startedAt, nil, nil, nil, fmt.Errorf("list fansgurus services: %w", err))
 		return nil, fmt.Errorf("list fansgurus services: %w", err)
 	}
-	tgxItems, err := tgxClient.ListItems(ctx)
+	cfg := DefaultUpstreamSyncConfig()
+	if s.settingService != nil {
+		cfg, _ = s.settingService.GetUpstreamSyncConfig("")
+	}
+	tgxItems, err := s.listTGXCatalogWithRetry(ctx, input.TGXConnectionID, tgxClient, cfg)
 	if err != nil {
 		s.recordProviderCatalogSyncRun(startedAt, fansServices, nil, nil, fmt.Errorf("list tgx items: %w", err))
 		return nil, fmt.Errorf("list tgx items: %w", err)
@@ -119,6 +123,31 @@ func (s *ProductMappingService) SyncProviderCatalogWithClients(
 	}
 	s.recordProviderCatalogSyncRun(startedAt, fansServices, tgxItems.Items, result, nil)
 	return result, nil
+}
+
+func (s *ProductMappingService) listTGXCatalogWithRetry(ctx context.Context, connectionID uint, client TGXCatalogClient, cfg UpstreamSyncConfig) (*upstream.TGXItemsResponse, error) {
+	cfg = NormalizeUpstreamSyncConfig(cfg)
+	var lastErr error
+	for attempt := 0; attempt <= cfg.TGXInventoryRetries; attempt++ {
+		if err := waitForTGXRequest(ctx, connectionID, cfg.TGXInventoryRateLimit); err != nil {
+			return nil, err
+		}
+		items, err := client.ListItems(ctx)
+		if err == nil && items != nil {
+			return items, nil
+		}
+		if err == nil {
+			err = fmt.Errorf("empty TGX catalog response")
+		}
+		lastErr = err
+		if !isRetryableTGXInventoryError(err) || attempt == cfg.TGXInventoryRetries {
+			break
+		}
+		if err := waitTGXRetryBackoff(ctx, attempt); err != nil {
+			return nil, err
+		}
+	}
+	return nil, lastErr
 }
 
 func providerCatalogFilterReasons(catalog upstream.FilteredCatalog) []ProviderCatalogFilterReason {

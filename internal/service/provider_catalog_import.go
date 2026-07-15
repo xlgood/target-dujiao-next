@@ -199,6 +199,14 @@ func (s *ProductMappingService) refreshProviderCatalogItemInTx(tx *gorm.DB, mapp
 	if product == nil {
 		return ErrMappingNotFound
 	}
+	if mapping.PlatformLocked {
+		platform = mapping.Platform
+	} else {
+		mapping.Platform = platform
+		if err := s.mappingRepo.WithTx(tx).Update(mapping); err != nil {
+			return err
+		}
+	}
 	category, err := findOrCreateProviderCategoryTx(tx, platform)
 	if err != nil {
 		return err
@@ -220,7 +228,7 @@ func (s *ProductMappingService) refreshProviderCatalogItemInTx(tx *gorm.DB, mapp
 	product.MinPurchaseQuantity = item.MinQuantity
 	product.MaxPurchaseQuantity = item.MaxQuantity
 	product.ManualFormSchemaJSON = providerCatalogManualFormSchema(item)
-	product.Images = models.StringArray(item.Images)
+	product.Images = models.StringArray{models.ProviderCatalogImagePath(platform)}
 	product.SortOrder = item.SortOrder
 	product.Tags = models.StringArray{}
 	product.IsMapped = true

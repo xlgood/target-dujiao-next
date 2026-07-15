@@ -410,6 +410,40 @@ func TestProductServiceQuickUpdateRejectsActivationWithoutCategory(t *testing.T)
 	}
 }
 
+func TestProductServiceRejectsUnapprovedCatalogActivation(t *testing.T) {
+	svc, db := newProductServiceForTest(t)
+	category := models.Category{Slug: "instagram", NameJSON: models.JSON{"zh-CN": "Instagram"}, IsActive: true}
+	if err := db.Create(&category).Error; err != nil {
+		t.Fatal(err)
+	}
+	product := models.Product{
+		CategoryID: category.ID, Slug: "pending-catalog-product", TitleJSON: models.JSON{"zh-CN": "Pending"},
+		PriceAmount: models.NewMoneyFromDecimal(decimal.NewFromInt(10)), FulfillmentType: constants.FulfillmentTypeUpstream,
+		IsMapped: true, IsActive: false,
+	}
+	if err := db.Create(&product).Error; err != nil {
+		t.Fatal(err)
+	}
+	mapping := models.ProductMapping{
+		ConnectionID: 1, LocalProductID: product.ID, Provider: "fansgurus", Platform: "instagram",
+		CatalogReviewStatus: models.CatalogReviewPending, IsActive: true,
+	}
+	if err := db.Create(&mapping).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := svc.QuickUpdate(strconv.FormatUint(uint64(product.ID), 10), map[string]interface{}{"is_active": true})
+	if !errors.Is(err, ErrProductCatalogReviewRequired) {
+		t.Fatalf("expected review guard, got %v", err)
+	}
+	if err := db.Model(&mapping).Update("catalog_review_status", models.CatalogReviewApproved).Error; err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.QuickUpdate(strconv.FormatUint(uint64(product.ID), 10), map[string]interface{}{"is_active": true}); err != nil {
+		t.Fatalf("approved product should publish: %v", err)
+	}
+}
+
 func TestProductServiceListPublicSortOrderDescending(t *testing.T) {
 	svc, db := newProductServiceForTest(t)
 

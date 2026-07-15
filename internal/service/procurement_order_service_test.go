@@ -1132,19 +1132,19 @@ func TestSubmitToUpstream_FansGurusUnavailableFailsForUserWithoutRetry(t *testin
 
 	var updatedProc models.ProcurementOrder
 	db.First(&updatedProc, proc.ID)
-	if updatedProc.Status != constants.ProcurementStatusFailed {
-		t.Fatalf("status=%s, want %s", updatedProc.Status, constants.ProcurementStatusFailed)
+	if updatedProc.Status != constants.ProcurementStatusManualReview {
+		t.Fatalf("status=%s, want %s", updatedProc.Status, constants.ProcurementStatusManualReview)
 	}
 	if updatedProc.RetryCount != 0 || updatedProc.NextRetryAt != nil {
 		t.Fatalf("unavailable provider submit must not auto retry: retry_count=%d next_retry_at=%v", updatedProc.RetryCount, updatedProc.NextRetryAt)
 	}
-	if updatedProc.ErrorMessage != providerSubmitTemporarilyUnavailable {
+	if updatedProc.ErrorMessage != providerSubmitResultUncertain {
 		t.Fatalf("error_message=%q", updatedProc.ErrorMessage)
 	}
 	var updatedOrder models.Order
 	db.First(&updatedOrder, order.ID)
-	if updatedOrder.Status != constants.OrderStatusPaid {
-		t.Fatalf("order status=%s, want %s", updatedOrder.Status, constants.OrderStatusPaid)
+	if updatedOrder.Status != constants.OrderStatusFulfilling {
+		t.Fatalf("order status=%s, want %s", updatedOrder.Status, constants.OrderStatusFulfilling)
 	}
 }
 
@@ -1307,10 +1307,10 @@ func TestSubmitToUpstream_TGXProviderFailsSafelyWithoutTradeNo(t *testing.T) {
 
 	var updatedProc models.ProcurementOrder
 	db.First(&updatedProc, proc.ID)
-	if updatedProc.Status != constants.ProcurementStatusFailed || updatedProc.UpstreamOrderNo != "" {
+	if updatedProc.Status != constants.ProcurementStatusManualReview || updatedProc.UpstreamOrderNo != "" {
 		t.Fatalf("unexpected procurement: %+v", updatedProc)
 	}
-	if updatedProc.ErrorMessage != providerSubmitTemporarilyUnavailable {
+	if updatedProc.ErrorMessage != providerSubmitResultUncertain {
 		t.Fatalf("error_message=%q", updatedProc.ErrorMessage)
 	}
 	var fulfillmentCount int64
@@ -1355,6 +1355,59 @@ func TestHandleSubmitFailure_MaxRetriesExhausted(t *testing.T) {
 	db.First(&updatedOrder, order.ID)
 	if updatedOrder.Status != constants.OrderStatusPaid {
 		t.Errorf("expected order status %q, got %q", constants.OrderStatusPaid, updatedOrder.Status)
+	}
+}
+
+func TestManualReviewRequiresControlledResolution(t *testing.T) {
+	db := setupProcurementTestDB(t)
+	order := createProcTestOrder(t, db, "PROC-MANUAL-REVIEW-001", constants.OrderStatusFulfilling, constants.FulfillmentTypeUpstream)
+	connSvc := NewSiteConnectionService(repository.NewSiteConnectionRepository(db), "test-key", t.TempDir())
+	conn, err := connSvc.Create(CreateConnectionInput{
+		Name: "TGX", BaseURL: "https://tgx.example", ApiKey: "app-id", ApiSecret: "app-key", Protocol: constants.ConnectionProtocolTGXAccount,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	proc := createTestProcurementOrder(t, db, conn.ID, order.ID, order.OrderNo, constants.ProcurementStatusManualReview)
+	svc := newTestProcurementService(db, connSvc)
+
+	if err := svc.RetryManual(proc.ID); !errors.Is(err, ErrProcurementStatusInvalid) {
+		t.Fatalf("manual review must reject generic retry, got %v", err)
+	}
+	if err := svc.ResolveManualReview(proc.ID, ResolveManualReviewInput{Resolution: "not_created"}); err != nil {
+		t.Fatalf("confirm not created: %v", err)
+	}
+	var resumed models.ProcurementOrder
+	if err := db.First(&resumed, proc.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if resumed.Status != constants.ProcurementStatusPending {
+		t.Fatalf("status=%s, want pending", resumed.Status)
+	}
+}
+
+func TestManualReviewCanBindTGXOrder(t *testing.T) {
+	db := setupProcurementTestDB(t)
+	order := createProcTestOrder(t, db, "PROC-MANUAL-BIND-001", constants.OrderStatusFulfilling, constants.FulfillmentTypeUpstream)
+	connSvc := NewSiteConnectionService(repository.NewSiteConnectionRepository(db), "test-key", t.TempDir())
+	conn, err := connSvc.Create(CreateConnectionInput{
+		Name: "TGX", BaseURL: "https://tgx.example", ApiKey: "app-id", ApiSecret: "app-key", Protocol: constants.ConnectionProtocolTGXAccount,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	proc := createTestProcurementOrder(t, db, conn.ID, order.ID, order.OrderNo, constants.ProcurementStatusManualReview)
+	svc := newTestProcurementService(db, connSvc)
+
+	if err := svc.ResolveManualReview(proc.ID, ResolveManualReviewInput{Resolution: "bind", UpstreamOrderNo: "TGX-BOUND-1001"}); err != nil {
+		t.Fatalf("bind upstream order: %v", err)
+	}
+	var bound models.ProcurementOrder
+	if err := db.First(&bound, proc.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if bound.Status != constants.ProcurementStatusAccepted || bound.UpstreamOrderNo != "TGX-BOUND-1001" {
+		t.Fatalf("bound procurement=%+v", bound)
 	}
 }
 
@@ -1686,6 +1739,10 @@ func TestCreateForOrder_IdempotentSkipsDuplicate(t *testing.T) {
 	db := setupProcurementTestDB(t)
 
 	order := createProcTestOrder(t, db, "PROC-DUP-001", constants.OrderStatusPaid, constants.FulfillmentTypeUpstream)
+	conn := &models.SiteConnection{ID: 1, Name: "test upstream", BaseURL: "https://upstream.example", ApiKey: "key", ApiSecret: "secret", Status: constants.ConnectionStatusActive}
+	if err := db.Create(conn).Error; err != nil {
+		t.Fatalf("create connection: %v", err)
+	}
 	pm := &models.ProductMapping{ConnectionID: 1, LocalProductID: 1, UpstreamProductID: 101, IsActive: true}
 	db.Create(pm)
 

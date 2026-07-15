@@ -155,6 +155,30 @@ func ensureProviderCatalogReviewMigration() error {
 	})
 }
 
+// ensureProviderCatalogReviewCorrectionMigration corrects the v1 migration:
+// only catalog products already published before staged review remain approved.
+func ensureProviderCatalogReviewCorrectionMigration() error {
+	if DB == nil {
+		return errors.New("database is not initialized")
+	}
+	var marker Setting
+	if err := DB.First(&marker, "key = ?", catalogReviewCorrectionMigrationSettingKey).Error; err == nil && migrationDone(marker.ValueJSON) {
+		return nil
+	} else if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		return err
+	}
+	return DB.Transaction(func(tx *gorm.DB) error {
+		inactiveProducts := tx.Model(&Product{}).Select("id").Where("is_active = ? AND deleted_at IS NULL", false)
+		if err := tx.Model(&ProductMapping{}).
+			Where("provider IN ?", []string{"tgx", "fansgurus"}).
+			Where("local_product_id IN (?)", inactiveProducts).
+			Update("catalog_review_status", CatalogReviewPending).Error; err != nil {
+			return err
+		}
+		return tx.Save(&Setting{Key: catalogReviewCorrectionMigrationSettingKey, ValueJSON: JSON{"done": true, "migrated_at": time.Now().UTC().Format(time.RFC3339)}}).Error
+	})
+}
+
 // ensureOrderItemOriginalPriceMigration 为历史订单项回填原价快照。
 // 历史数据没有真实原价，只能以当时已记录的 unit_price/total_price 作为兼容回填。
 func ensureOrderItemOriginalPriceMigration() error {

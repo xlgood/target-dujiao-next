@@ -24,7 +24,8 @@ const (
 	// TaskResellerConfirmLedger 分销商账务到期确认任务
 	TaskResellerConfirmLedger = constants.TaskResellerConfirmLedger
 	// TaskUpstreamSyncStock 上游库存同步任务
-	TaskUpstreamSyncStock = constants.TaskUpstreamSyncStock
+	TaskUpstreamSyncStock    = constants.TaskUpstreamSyncStock
+	TaskProviderBalanceCheck = constants.TaskProviderBalanceCheck
 	// TaskProcurementSubmit 采购提交任务
 	TaskProcurementSubmit = constants.TaskProcurementSubmit
 	// TaskProcurementPollStatus 采购状态轮询任务
@@ -143,6 +144,10 @@ func NewResellerConfirmLedgerTask() *asynq.Task {
 // NewUpstreamSyncStockTask 创建上游库存同步任务
 func NewUpstreamSyncStockTask() *asynq.Task {
 	return asynq.NewTask(TaskUpstreamSyncStock, nil)
+}
+
+func NewProviderBalanceCheckTask() *asynq.Task {
+	return asynq.NewTask(TaskProviderBalanceCheck, nil)
 }
 
 // NewProcurementSyncAcceptedTask 创建采购单定时巡检任务

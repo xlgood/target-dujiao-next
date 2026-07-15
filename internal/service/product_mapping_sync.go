@@ -457,8 +457,15 @@ func (s *ProductMappingService) ensureTGXInventoryForOrder(conn *models.SiteConn
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	client := upstream.NewTGXClient(conn.BaseURL, conn.ApiKey, appKey)
-	inventory, err := client.GetInventory(ctx, sharedCode, race)
+	cfg := DefaultUpstreamSyncConfig()
+	if s.settingService != nil {
+		cfg, _ = s.settingService.GetUpstreamSyncConfig("")
+	}
+	inventory, err := s.getTGXInventoryWithRetry(ctx, conn.ID, client, sharedCode, race, cfg)
 	if err != nil {
+		return err
+	}
+	if err := waitForTGXRequest(ctx, conn.ID, cfg.TGXInventoryRateLimit); err != nil {
 		return err
 	}
 	state, err := client.GetInventoryState(ctx, sharedCode, race, quantity)
@@ -520,6 +527,10 @@ func (s *ProductMappingService) RefreshTGXInventory(mappingID uint) error {
 	if err != nil {
 		return err
 	}
+	cfg := DefaultUpstreamSyncConfig()
+	if s.settingService != nil {
+		cfg, _ = s.settingService.GetUpstreamSyncConfig("")
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	client := upstream.NewTGXClient(conn.BaseURL, conn.ApiKey, appKey)
@@ -529,7 +540,7 @@ func (s *ProductMappingService) RefreshTGXInventory(mappingID uint) error {
 		if sharedCode == "" {
 			return fmt.Errorf("invalid TGX shared code for SKU mapping %d", skuMappings[i].ID)
 		}
-		inventory, err := client.GetInventory(ctx, sharedCode, race)
+		inventory, err := s.getTGXInventoryWithRetry(ctx, conn.ID, client, sharedCode, race, cfg)
 		if err != nil {
 			return fmt.Errorf("get TGX inventory for %s: %w", sharedCode, err)
 		}
@@ -802,9 +813,6 @@ func (s *ProductMappingService) syncTGXConnectionStockWithConfig(conn *models.Si
 	jobs := make(chan *models.SKUMapping)
 	results := make(chan tgxInventoryRefresh, len(skuMappings))
 	var wg sync.WaitGroup
-	requestInterval := time.Second / time.Duration(cfg.TGXInventoryRateLimit)
-	limiter := time.NewTicker(requestInterval)
-	defer limiter.Stop()
 	for range cfg.TGXInventoryConcurrency {
 		wg.Add(1)
 		go func() {
@@ -815,7 +823,7 @@ func (s *ProductMappingService) syncTGXConnectionStockWithConfig(conn *models.Si
 					results <- tgxInventoryRefresh{mapping: skuMapping, err: fmt.Errorf("invalid TGX shared code for SKU mapping %d", skuMapping.ID)}
 					continue
 				}
-				inventory, inventoryErr := getTGXInventoryWithRetry(client, sharedCode, race, cfg.TGXInventoryRetries, limiter.C)
+				inventory, inventoryErr := s.getTGXInventoryWithRetry(context.Background(), conn.ID, client, sharedCode, race, cfg)
 				if inventoryErr != nil {
 					results <- tgxInventoryRefresh{mapping: skuMapping, err: inventoryErr}
 					continue
@@ -864,12 +872,14 @@ func (s *ProductMappingService) syncTGXConnectionStockWithConfig(conn *models.Si
 	return errors.Join(errs...)
 }
 
-func getTGXInventoryWithRetry(client *upstream.TGXClient, sharedCode, race string, retries int, limiter <-chan time.Time) (*upstream.TGXInventoryResponse, error) {
+func (s *ProductMappingService) getTGXInventoryWithRetry(ctx context.Context, connectionID uint, client *upstream.TGXClient, sharedCode, race string, cfg UpstreamSyncConfig) (*upstream.TGXInventoryResponse, error) {
 	var lastErr error
-	for attempt := 0; attempt <= retries; attempt++ {
-		<-limiter
-		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-		inventory, err := client.GetInventory(ctx, sharedCode, race)
+	for attempt := 0; attempt <= cfg.TGXInventoryRetries; attempt++ {
+		if err := waitForTGXRequest(ctx, connectionID, cfg.TGXInventoryRateLimit); err != nil {
+			return nil, err
+		}
+		requestCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+		inventory, err := client.GetInventory(requestCtx, sharedCode, race)
 		cancel()
 		if err == nil && inventory != nil {
 			return inventory, nil
@@ -878,10 +888,12 @@ func getTGXInventoryWithRetry(client *upstream.TGXClient, sharedCode, race strin
 			err = fmt.Errorf("empty TGX inventory response for %s", sharedCode)
 		}
 		lastErr = err
-		if !isRetryableTGXInventoryError(err) || attempt == retries {
+		if !isRetryableTGXInventoryError(err) || attempt == cfg.TGXInventoryRetries {
 			break
 		}
-		time.Sleep(time.Duration(attempt+1) * 200 * time.Millisecond)
+		if err := waitTGXRetryBackoff(ctx, attempt); err != nil {
+			return nil, err
+		}
 	}
 	return nil, lastErr
 }
@@ -895,14 +907,27 @@ func isRetryableTGXInventoryError(err error) bool {
 }
 
 func (s *ProductMappingService) recordTGXInventorySyncRun(connectionID uint, startedAt time.Time, total, succeeded int, failedDetails []map[string]interface{}) {
-	if s == nil || s.tgxSyncRunRepo == nil {
+	if s == nil {
 		return
 	}
 	status := "success"
 	if len(failedDetails) > 0 {
 		status = "partial"
 	}
-	_ = s.tgxSyncRunRepo.Create(&models.TGXInventorySyncRun{ConnectionID: connectionID, Status: status, Total: total, Succeeded: succeeded, Failed: len(failedDetails), FailedDetails: models.JSON{"items": failedDetails}, StartedAt: startedAt, FinishedAt: time.Now()})
+	if succeeded == 0 && len(failedDetails) > 0 {
+		status = "failed"
+	}
+	if s.tgxSyncRunRepo != nil {
+		_ = s.tgxSyncRunRepo.Create(&models.TGXInventorySyncRun{ConnectionID: connectionID, Status: status, Total: total, Succeeded: succeeded, Failed: len(failedDetails), FailedDetails: models.JSON{"items": failedDetails}, StartedAt: startedAt, FinishedAt: time.Now()})
+	}
+	if len(failedDetails) > 0 && s.notificationSvc != nil {
+		_ = s.notificationSvc.Enqueue(NotificationEnqueueInput{
+			EventType: constants.NotificationEventExceptionAlert,
+			BizType:   constants.NotificationBizTypeProcurement,
+			BizID:     connectionID,
+			Data:      models.JSON{"connection_id": connectionID, "sync_total": total, "sync_succeeded": succeeded, "sync_failed": len(failedDetails), "failed_items": failedDetails},
+		})
+	}
 }
 
 // syncProductFromData 使用已拉取的上游数据同步单个映射（不再发 HTTP 请求）

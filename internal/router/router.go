@@ -551,6 +551,7 @@ func SetupRouter(cfg *config.Config, c *provider.Container) *gin.Engine {
 				authorized.POST("/product-mappings/:id/sync", adminHandler.SyncProductMapping)
 				authorized.POST("/product-mappings/:id/tgx-inventory", adminHandler.RefreshTGXMappingInventory)
 				authorized.PUT("/product-mappings/:id/platform", adminHandler.CorrectProviderCatalogPlatform)
+				authorized.DELETE("/product-mappings/:id/platform", adminHandler.RestoreProviderCatalogPlatformAutoDetection)
 				authorized.PUT("/product-mappings/:id/status", adminHandler.UpdateProductMappingStatus)
 				authorized.DELETE("/product-mappings/:id", adminHandler.DeleteProductMapping)
 				authorized.POST("/product-mappings/batch-sync", adminHandler.BatchSyncProductMappings)
@@ -567,6 +568,7 @@ func SetupRouter(cfg *config.Config, c *provider.Container) *gin.Engine {
 				authorized.GET("/procurement-orders/:id", adminHandler.GetProcurementOrder)
 				authorized.GET("/procurement-orders/:id/upstream-payload/download", adminHandler.DownloadProcurementUpstreamPayload)
 				authorized.POST("/procurement-orders/:id/retry", adminHandler.RetryProcurementOrder)
+				authorized.POST("/procurement-orders/:id/resolve-manual-review", adminHandler.ResolveProcurementManualReview)
 				authorized.POST("/procurement-orders/:id/sync-status", adminHandler.SyncProcurementOrderStatus)
 				authorized.POST("/procurement-orders/:id/cancel", adminHandler.CancelProcurementOrder)
 

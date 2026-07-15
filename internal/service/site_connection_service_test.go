@@ -1,7 +1,10 @@
 package service
 
 import (
+	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -81,6 +84,31 @@ func TestSiteConnectionServiceCreateRequiresSecretForTGX(t *testing.T) {
 	}
 }
 
+func TestSiteConnectionServiceCheckActiveBalancesRecordsLowBalance(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{"balance": "5.00", "currency": "USD"})
+	}))
+	defer server.Close()
+	repo := &siteConnectionRepoStub{conn: &models.SiteConnection{
+		ID: 9, Name: "FansGurus", BaseURL: server.URL, ApiKey: "key", Protocol: constants.ConnectionProtocolFansGurus,
+		Status: constants.ConnectionStatusActive, BalanceAlertMinimum: decimal.NewFromInt(10),
+	}}
+	snapshotRepo := &balanceSnapshotRepoStub{}
+	svc := NewSiteConnectionService(repo, "test-secret-key", t.TempDir())
+	svc.SetBalanceSnapshotRepository(snapshotRepo)
+
+	svc.CheckActiveBalances()
+
+	if len(snapshotRepo.snapshots) != 1 {
+		t.Fatalf("snapshot count=%d, want 1", len(snapshotRepo.snapshots))
+	}
+	got := snapshotRepo.snapshots[0]
+	if got.Status != "low_balance" || got.Balance != "5.00" || got.Currency != "USD" {
+		t.Fatalf("snapshot=%+v", got)
+	}
+}
+
 type fakeMarkupReapplier struct {
 	calls []uint
 }
@@ -139,6 +167,25 @@ func TestSiteConnectionServiceUpdateSkipsReapplyWhenPriceConfigUnchanged(t *test
 type siteConnectionRepoStub struct {
 	conn    *models.SiteConnection
 	updated bool
+}
+
+type balanceSnapshotRepoStub struct {
+	snapshots []models.ProviderBalanceSnapshot
+}
+
+func (r *balanceSnapshotRepoStub) Create(snapshot *models.ProviderBalanceSnapshot) error {
+	r.snapshots = append(r.snapshots, *snapshot)
+	return nil
+}
+
+func (r *balanceSnapshotRepoStub) Latest(connectionID uint) (*models.ProviderBalanceSnapshot, error) {
+	for i := len(r.snapshots) - 1; i >= 0; i-- {
+		if r.snapshots[i].ConnectionID == connectionID {
+			copy := r.snapshots[i]
+			return &copy, nil
+		}
+	}
+	return nil, nil
 }
 
 func (r *siteConnectionRepoStub) GetByID(id uint) (*models.SiteConnection, error) {

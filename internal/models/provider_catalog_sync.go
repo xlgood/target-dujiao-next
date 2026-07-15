@@ -44,3 +44,17 @@ type TGXInventorySyncRun struct {
 }
 
 func (TGXInventorySyncRun) TableName() string { return "tgx_inventory_sync_runs" }
+
+// ProviderBalanceSnapshot records scheduled upstream balance checks for trend and alert review.
+type ProviderBalanceSnapshot struct {
+	ID           uint      `gorm:"primarykey" json:"id"`
+	ConnectionID uint      `gorm:"index;not null" json:"connection_id"`
+	Balance      string    `gorm:"type:varchar(64);not null" json:"balance"`
+	Currency     string    `gorm:"type:varchar(10);not null" json:"currency"`
+	Status       string    `gorm:"type:varchar(20);not null;default:'success';index" json:"status"`
+	ErrorMessage string    `gorm:"type:text" json:"error_message,omitempty"`
+	CheckedAt    time.Time `gorm:"index" json:"checked_at"`
+	CreatedAt    time.Time `gorm:"index" json:"created_at"`
+}
+
+func (ProviderBalanceSnapshot) TableName() string { return "provider_balance_snapshots" }

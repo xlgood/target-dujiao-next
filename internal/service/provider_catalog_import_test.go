@@ -196,11 +196,26 @@ func TestProviderCatalogApprovalAndPlatformCorrection(t *testing.T) {
 	if err := svc.CorrectProviderCatalogPlatform(mapping.ID, "facebook"); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.First(&mapping, mapping.ID).Error; err != nil || mapping.Platform != "facebook" {
+	if err := db.First(&mapping, mapping.ID).Error; err != nil || mapping.Platform != "facebook" || !mapping.PlatformLocked {
 		t.Fatalf("mapping=%+v err=%v", mapping, err)
 	}
 	if err := db.First(&product, product.ID).Error; err != nil || len(product.Images) != 1 || product.Images[0] != "/uploads/catalog/facebook.svg" {
 		t.Fatalf("product=%+v err=%v", product, err)
+	}
+	if _, err := svc.ImportProviderCatalogByProviderConnections(map[string]uint{upstream.CatalogProviderFansGurus: conn.ID}, catalog); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.First(&mapping, mapping.ID).Error; err != nil || mapping.Platform != "facebook" {
+		t.Fatalf("sync overwrote locked platform: mapping=%+v err=%v", mapping, err)
+	}
+	if err := svc.RestoreProviderCatalogPlatformAutoDetection(mapping.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.ImportProviderCatalogByProviderConnections(map[string]uint{upstream.CatalogProviderFansGurus: conn.ID}, catalog); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.First(&mapping, mapping.ID).Error; err != nil || mapping.Platform != "instagram" || mapping.PlatformLocked {
+		t.Fatalf("automatic platform was not restored: mapping=%+v err=%v", mapping, err)
 	}
 	if count, err := svc.ApproveProviderCatalogMappings([]uint{mapping.ID}); err != nil || count != 1 {
 		t.Fatalf("approve count=%d err=%v", count, err)

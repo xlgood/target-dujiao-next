@@ -25,14 +25,15 @@ import (
 )
 
 var (
-	ErrProcurementNotFound          = errors.New("procurement order not found")
-	ErrProcurementExists            = errors.New("procurement order already exists")
-	ErrProcurementStatusInvalid     = errors.New("procurement order status invalid")
-	ErrProcurementRetryDenied       = errors.New("procurement order retry denied")
-	ErrProcurementCancelUnsupported = errors.New("procurement order cancel unsupported")
+	ErrProcurementNotFound           = errors.New("procurement order not found")
+	ErrProcurementExists             = errors.New("procurement order already exists")
+	ErrProcurementStatusInvalid      = errors.New("procurement order status invalid")
+	ErrProcurementRetryDenied        = errors.New("procurement order retry denied")
+	ErrProcurementCancelUnsupported  = errors.New("procurement order cancel unsupported")
+	ErrProcurementManualReviewDenied = errors.New("procurement order is not awaiting manual review")
 )
 
-const providerSubmitTemporarilyUnavailable = "provider_submit_temporarily_unavailable"
+const providerSubmitResultUncertain = "provider_submit_result_uncertain"
 
 // ProcurementOrderService 采购单服务
 type ProcurementOrderService struct {
@@ -480,12 +481,19 @@ func (s *ProcurementOrderService) submitTGXProcurement(ctx context.Context, proc
 	}
 
 	client := upstream.NewTGXClient(conn.BaseURL, conn.ApiKey, appKey)
-	if err := s.verifyTGXInventory(ctx, client, skuMapping, sharedCode, race, item.Quantity); err != nil {
+	if err := s.verifyTGXInventory(ctx, conn.ID, client, skuMapping, sharedCode, race, item.Quantity); err != nil {
 		if errors.Is(err, ErrUpstreamStockInsufficient) {
 			s.rejectProcurement(procOrder, "tgx inventory is insufficient")
 			return nil
 		}
 		return s.failProviderSubmitForUser(procOrder, localOrder, fmt.Sprintf("tgx inventory check unavailable: %v", err))
+	}
+	cfg := DefaultUpstreamSyncConfig()
+	if s.settingService != nil {
+		cfg, _ = s.settingService.GetUpstreamSyncConfig("")
+	}
+	if err := waitForTGXRequest(ctx, conn.ID, cfg.TGXInventoryRateLimit); err != nil {
+		return s.failProviderSubmitForUser(procOrder, localOrder, fmt.Sprintf("tgx trade rate limit unavailable: %v", err))
 	}
 	resp, err := client.Trade(ctx, req)
 	if err != nil {
@@ -501,12 +509,38 @@ func (s *ProcurementOrderService) submitTGXProcurement(ctx context.Context, proc
 	return s.acceptTGXProcurement(procOrder, localOrder, resp.TradeNo, resp.Secret, resp.Status)
 }
 
-func (s *ProcurementOrderService) verifyTGXInventory(ctx context.Context, client *upstream.TGXClient, skuMapping *models.SKUMapping, sharedCode, race string, quantity int) error {
+func (s *ProcurementOrderService) verifyTGXInventory(ctx context.Context, connectionID uint, client *upstream.TGXClient, skuMapping *models.SKUMapping, sharedCode, race string, quantity int) error {
 	if client == nil || skuMapping == nil || sharedCode == "" || quantity <= 0 {
 		return ErrUpstreamStockInsufficient
 	}
-	inventory, err := client.GetInventory(ctx, sharedCode, race)
+	cfg := DefaultUpstreamSyncConfig()
+	if s.settingService != nil {
+		cfg, _ = s.settingService.GetUpstreamSyncConfig("")
+	}
+	var inventory *upstream.TGXInventoryResponse
+	var err error
+	for attempt := 0; attempt <= cfg.TGXInventoryRetries; attempt++ {
+		if err = waitForTGXRequest(ctx, connectionID, cfg.TGXInventoryRateLimit); err != nil {
+			return err
+		}
+		inventory, err = client.GetInventory(ctx, sharedCode, race)
+		if err == nil && inventory != nil {
+			break
+		}
+		if err == nil {
+			err = fmt.Errorf("empty TGX inventory response for %s", sharedCode)
+		}
+		if !isRetryableTGXInventoryError(err) || attempt == cfg.TGXInventoryRetries {
+			return err
+		}
+		if err := waitTGXRetryBackoff(ctx, attempt); err != nil {
+			return err
+		}
+	}
 	if err != nil {
+		return err
+	}
+	if err := waitForTGXRequest(ctx, connectionID, cfg.TGXInventoryRateLimit); err != nil {
 		return err
 	}
 	state, err := client.GetInventoryState(ctx, sharedCode, race, quantity)
@@ -572,18 +606,15 @@ func (s *ProcurementOrderService) acceptTGXProcurement(procOrder *models.Procure
 func (s *ProcurementOrderService) failProviderSubmitForUser(procOrder *models.ProcurementOrder, localOrder *models.Order, detail string) error {
 	now := time.Now()
 	updates := map[string]interface{}{
-		"error_message": providerSubmitTemporarilyUnavailable,
+		"error_message": providerSubmitResultUncertain,
 		"retry_count":   0,
 		"next_retry_at": nil,
 		"updated_at":    now,
 	}
-	if err := s.procRepo.UpdateStatus(procOrder.ID, constants.ProcurementStatusFailed, updates); err != nil {
-		return fmt.Errorf("update procurement status (failed): %w", err)
+	if err := s.procRepo.UpdateStatus(procOrder.ID, constants.ProcurementStatusManualReview, updates); err != nil {
+		return fmt.Errorf("update procurement status (manual review): %w", err)
 	}
-	if localOrder != nil && localOrder.Status == constants.OrderStatusFulfilling {
-		_ = s.orderRepo.UpdateStatus(localOrder.ID, constants.OrderStatusPaid, map[string]interface{}{"updated_at": now})
-	}
-	logger.Warnw("provider_submit_unavailable_user_notified",
+	logger.Warnw("provider_submit_result_uncertain_manual_review",
 		"procurement_order_id", procOrder.ID,
 		"local_order_no", procOrder.LocalOrderNo,
 		"error", detail,
@@ -1235,7 +1266,29 @@ func (s *ProcurementOrderService) pollTGXStatus(ctx context.Context, procOrder *
 		return fmt.Errorf("decrypt tgx app key: %w", err)
 	}
 	client := upstream.NewTGXClient(conn.BaseURL, conn.ApiKey, appKey)
-	status, err := client.QueryTrade(ctx, tradeNo)
+	cfg := DefaultUpstreamSyncConfig()
+	if s.settingService != nil {
+		cfg, _ = s.settingService.GetUpstreamSyncConfig("")
+	}
+	var status *upstream.TGXQueryResponse
+	for attempt := 0; attempt <= cfg.TGXInventoryRetries; attempt++ {
+		if err = waitForTGXRequest(ctx, conn.ID, cfg.TGXInventoryRateLimit); err != nil {
+			break
+		}
+		status, err = client.QueryTrade(ctx, tradeNo)
+		if err == nil && status != nil {
+			break
+		}
+		if err == nil {
+			err = fmt.Errorf("empty TGX trade query response")
+		}
+		if !isRetryableTGXInventoryError(err) || attempt == cfg.TGXInventoryRetries {
+			break
+		}
+		if err = waitTGXRetryBackoff(ctx, attempt); err != nil {
+			break
+		}
+	}
 	if err != nil {
 		logger.Warnw("procurement_tgx_poll_error",
 			"procurement_order_id", procOrder.ID,
@@ -1308,7 +1361,7 @@ func (s *ProcurementOrderService) IsUserRetryableTemporaryFailure(procOrder *mod
 	if status != constants.ProcurementStatusFailed && status != constants.ProcurementStatusRejected {
 		return false
 	}
-	return strings.TrimSpace(procOrder.ErrorMessage) == providerSubmitTemporarilyUnavailable
+	return false
 }
 
 // RetryUserTemporaryFailure lets a customer explicitly retry a temporary fulfillment submit failure.
@@ -1665,6 +1718,81 @@ func (s *ProcurementOrderService) RetryManual(id uint) error {
 		return s.queueClient.EnqueueProcurementSubmit(queue.ProcurementSubmitPayload{
 			ProcurementOrderID: procOrder.ID,
 		})
+	}
+	return nil
+}
+
+// ResolveManualReviewInput records the operator's verified upstream result.
+type ResolveManualReviewInput struct {
+	Resolution      string
+	UpstreamOrderNo string
+}
+
+// ResolveManualReview safely resumes an ambiguous submit after an operator checks the provider.
+func (s *ProcurementOrderService) ResolveManualReview(id uint, input ResolveManualReviewInput) error {
+	procOrder, err := s.procRepo.GetByID(id)
+	if err != nil {
+		return fmt.Errorf("load procurement order: %w", err)
+	}
+	if procOrder == nil {
+		return ErrProcurementNotFound
+	}
+	if procOrder.Status != constants.ProcurementStatusManualReview {
+		return ErrProcurementManualReviewDenied
+	}
+
+	resolution := strings.ToLower(strings.TrimSpace(input.Resolution))
+	switch resolution {
+	case "not_created":
+		now := time.Now()
+		if err := s.procRepo.UpdateStatus(procOrder.ID, constants.ProcurementStatusPending, map[string]interface{}{
+			"retry_count": 0, "next_retry_at": nil, "error_message": "", "updated_at": now,
+		}); err != nil {
+			return fmt.Errorf("resume procurement submit: %w", err)
+		}
+		logger.Warnw("procurement_manual_review_confirmed_not_created", "procurement_order_id", procOrder.ID)
+		if s.queueClient != nil {
+			return s.queueClient.EnqueueProcurementSubmit(queue.ProcurementSubmitPayload{ProcurementOrderID: procOrder.ID})
+		}
+		return nil
+	case "bind":
+		return s.bindManualReviewUpstreamOrder(procOrder, strings.TrimSpace(input.UpstreamOrderNo))
+	default:
+		return fmt.Errorf("invalid manual review resolution")
+	}
+}
+
+func (s *ProcurementOrderService) bindManualReviewUpstreamOrder(procOrder *models.ProcurementOrder, upstreamOrderNo string) error {
+	if upstreamOrderNo == "" {
+		return fmt.Errorf("upstream order number is required")
+	}
+	conn, err := s.connSvc.GetByID(procOrder.ConnectionID)
+	if err != nil {
+		return err
+	}
+	updates := map[string]interface{}{
+		"error_message": "", "retry_count": 0, "next_retry_at": nil, "updated_at": time.Now(),
+	}
+	switch conn.Protocol {
+	case constants.ConnectionProtocolFansGurus:
+		orderID, parseErr := strconv.ParseUint(upstreamOrderNo, 10, 64)
+		if parseErr != nil || orderID == 0 {
+			return fmt.Errorf("fansgurus upstream order id must be a positive integer")
+		}
+		updates["upstream_order_id"] = uint(orderID)
+		updates["upstream_order_no"] = upstreamOrderNo
+	case constants.ConnectionProtocolTGXAccount:
+		updates["upstream_order_no"] = upstreamOrderNo
+	default:
+		return fmt.Errorf("manual binding is unsupported for provider protocol %s", conn.Protocol)
+	}
+	if err := s.procRepo.UpdateStatus(procOrder.ID, constants.ProcurementStatusAccepted, updates); err != nil {
+		return fmt.Errorf("bind upstream order: %w", err)
+	}
+	_ = s.orderRepo.UpdateStatus(procOrder.LocalOrderID, constants.OrderStatusFulfilling, map[string]interface{}{"updated_at": time.Now()})
+	logger.Warnw("procurement_manual_review_bound", "procurement_order_id", procOrder.ID, "upstream_order_no", upstreamOrderNo)
+	if s.queueClient != nil {
+		_ = s.queueClient.EnqueueProcurementPollStatus(queue.ProcurementPollStatusPayload{ProcurementOrderID: procOrder.ID}, 5*time.Second)
 	}
 	return nil
 }

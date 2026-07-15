@@ -462,6 +462,11 @@ func (s *ProductService) Update(id string, input CreateProductInput) (*models.Pr
 	if product == nil {
 		return nil, ErrNotFound
 	}
+	if input.IsActive != nil && *input.IsActive {
+		if err := s.requireCatalogApproval(product.ID); err != nil {
+			return nil, err
+		}
+	}
 	if err := validateProductCategoryAssignment(s.categoryRepo, input.CategoryID, product.CategoryID); err != nil {
 		return nil, err
 	}
@@ -1162,6 +1167,9 @@ func (s *ProductService) QuickUpdate(id string, fields map[string]interface{}) (
 		return nil, ErrNotFound
 	}
 	if isQuickUpdateActivatingProduct(fields) {
+		if err := s.requireCatalogApproval(product.ID); err != nil {
+			return nil, err
+		}
 		categoryID := product.CategoryID
 		if rawCategoryID, ok := fields["category_id"]; ok {
 			parsedCategoryID, parseErr := quickUpdateCategoryID(rawCategoryID)
@@ -1178,6 +1186,20 @@ func (s *ProductService) QuickUpdate(id string, fields map[string]interface{}) (
 		return nil, err
 	}
 	return s.repo.GetByID(id)
+}
+
+func (s *ProductService) requireCatalogApproval(productID uint) error {
+	if s.productMappingRepo == nil {
+		return nil
+	}
+	mapping, err := s.productMappingRepo.GetByLocalProductID(productID)
+	if err != nil || mapping == nil {
+		return err
+	}
+	if (mapping.Provider == "tgx" || mapping.Provider == "fansgurus") && mapping.CatalogReviewStatus != models.CatalogReviewApproved {
+		return ErrProductCatalogReviewRequired
+	}
+	return nil
 }
 
 // UpdateWholesalePrices 更新商品批发价阶梯，不修改商品其他字段。

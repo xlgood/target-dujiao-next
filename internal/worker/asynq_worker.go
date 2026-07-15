@@ -51,6 +51,7 @@ func (c *Consumer) Register(mux *asynq.ServeMux) {
 	mux.HandleFunc(queue.TaskAffiliateConfirmCommissions, withPanicRecovery(queue.TaskAffiliateConfirmCommissions, c.handleAffiliateConfirmCommissions))
 	mux.HandleFunc(queue.TaskResellerConfirmLedger, withPanicRecovery(queue.TaskResellerConfirmLedger, c.handleResellerConfirmLedger))
 	mux.HandleFunc(queue.TaskUpstreamSyncStock, withPanicRecovery(queue.TaskUpstreamSyncStock, c.handleUpstreamSyncStock))
+	mux.HandleFunc(queue.TaskProviderBalanceCheck, withPanicRecovery(queue.TaskProviderBalanceCheck, c.handleProviderBalanceCheck))
 	mux.HandleFunc(queue.TaskProcurementSubmit, withPanicRecovery(queue.TaskProcurementSubmit, c.handleProcurementSubmit))
 	mux.HandleFunc(queue.TaskProcurementPollStatus, withPanicRecovery(queue.TaskProcurementPollStatus, c.handleProcurementPollStatus))
 	mux.HandleFunc(queue.TaskProcurementSyncAccepted, withPanicRecovery(queue.TaskProcurementSyncAccepted, c.handleProcurementSyncAccepted))
@@ -420,6 +421,13 @@ func (c *Consumer) handleUpstreamSyncStock(_ context.Context, _ *asynq.Task) err
 	if err := c.ProductMappingService.SyncAllStock(cfg); err != nil {
 		logger.Warnw("worker_upstream_sync_stock_failed", "error", err)
 		return err
+	}
+	return nil
+}
+
+func (c *Consumer) handleProviderBalanceCheck(_ context.Context, _ *asynq.Task) error {
+	if c != nil && c.SiteConnectionService != nil {
+		c.SiteConnectionService.CheckActiveBalances()
 	}
 	return nil
 }

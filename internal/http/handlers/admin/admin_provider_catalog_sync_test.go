@@ -151,7 +151,7 @@ func TestSyncProviderCatalogImportsThroughAdminTrigger(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if resp.StatusCode != 0 || resp.Data.Imported != 2 || resp.Data.FilteredPlatform != 1 {
+	if resp.StatusCode != 0 || resp.Data.Imported != 3 || resp.Data.FilteredPlatform != 0 {
 		t.Fatalf("unexpected response: %+v", resp)
 	}
 
@@ -159,8 +159,8 @@ func TestSyncProviderCatalogImportsThroughAdminTrigger(t *testing.T) {
 	if err := db.Order("provider ASC").Find(&mappings).Error; err != nil {
 		t.Fatalf("load mappings: %v", err)
 	}
-	if len(mappings) != 2 {
-		t.Fatalf("mapping count=%d, want 2", len(mappings))
+	if len(mappings) != 3 {
+		t.Fatalf("mapping count=%d, want 3", len(mappings))
 	}
 }
 

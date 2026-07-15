@@ -41,6 +41,7 @@ type ProductMappingService struct {
 	settingService  *SettingService
 	syncRunRepo     repository.ProviderCatalogSyncRunRepository
 	tgxSyncRunRepo  repository.TGXInventorySyncRunRepository
+	notificationSvc *NotificationService
 }
 
 // NewProductMappingService 创建商品映射服务
@@ -83,6 +84,10 @@ func (s *ProductMappingService) SetProviderCatalogSyncRunRepository(repo reposit
 
 func (s *ProductMappingService) SetTGXInventorySyncRunRepository(repo repository.TGXInventorySyncRunRepository) {
 	s.tgxSyncRunRepo = repo
+}
+
+func (s *ProductMappingService) SetNotificationService(svc *NotificationService) {
+	s.notificationSvc = svc
 }
 
 func (s *ProductMappingService) LatestTGXInventorySyncRun(connectionID uint) (*models.TGXInventorySyncRun, error) {
@@ -188,6 +193,7 @@ func (s *ProductMappingService) CorrectProviderCatalogPlatform(id uint, platform
 		return err
 	}
 	mapping.Platform = platform
+	mapping.PlatformLocked = true
 	if err := s.mappingRepo.Update(mapping); err != nil {
 		return err
 	}
@@ -213,6 +219,22 @@ func (s *ProductMappingService) CorrectProviderCatalogPlatform(id uint, platform
 		}
 	}
 	return nil
+}
+
+// RestoreProviderCatalogPlatformAutoDetection unlocks a manually corrected platform.
+func (s *ProductMappingService) RestoreProviderCatalogPlatformAutoDetection(id uint) error {
+	mapping, err := s.mappingRepo.GetByID(id)
+	if err != nil {
+		return err
+	}
+	if mapping == nil {
+		return ErrMappingNotFound
+	}
+	if !isProviderCatalogMapping(mapping) {
+		return ErrCatalogPlatformInvalid
+	}
+	mapping.PlatformLocked = false
+	return s.mappingRepo.Update(mapping)
 }
 
 var ErrCatalogPlatformInvalid = errors.New("invalid provider catalog platform")

@@ -105,6 +105,14 @@ func registerPeriodicTasks(scheduler *asynq.Scheduler, consumer *Consumer, cfg *
 			}
 		}
 	}
+	if consumer.SiteConnectionService != nil {
+		entryID, err := scheduler.Register("@every 5m", queue.NewProviderBalanceCheckTask(), asynq.Queue(queue.DefaultQueue))
+		if err != nil {
+			logger.Warnw("scheduler_register_provider_balance_check_failed", "error", err)
+		} else {
+			logger.Infow("scheduler_register_provider_balance_check_ok", "entry_id", entryID)
+		}
+	}
 	if consumer.ProcurementOrderService != nil {
 		task := queue.NewProcurementSyncAcceptedTask()
 		entryID, err := scheduler.Register("@every 30m", task, asynq.Queue(queue.DefaultQueue))

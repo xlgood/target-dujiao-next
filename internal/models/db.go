@@ -24,6 +24,7 @@ const (
 	providerCatalogImageMigrationSettingKey         = "migration/provider_catalog_images_v3"
 	tgxUnknownStockMigrationSettingKey              = "migration/tgx_unknown_stock_v1"
 	catalogReviewMigrationSettingKey                = "migration/provider_catalog_review_v1"
+	catalogReviewCorrectionMigrationSettingKey      = "migration/provider_catalog_review_v2"
 	manualStockUnlimitedValue                       = -1
 )
 
@@ -165,6 +166,7 @@ func AutoMigrate() error {
 		&SKUMapping{},
 		&ProviderCatalogSyncRun{},
 		&TGXInventorySyncRun{},
+		&ProviderBalanceSnapshot{},
 		&ProcurementOrder{},
 		&DownstreamOrderRef{},
 		&ReconciliationJob{},
@@ -207,6 +209,9 @@ func AutoMigrate() error {
 		return err
 	}
 	if err := ensureProviderCatalogReviewMigration(); err != nil {
+		return err
+	}
+	if err := ensureProviderCatalogReviewCorrectionMigration(); err != nil {
 		return err
 	}
 	if err := ensureResellerIndexes(DB); err != nil {

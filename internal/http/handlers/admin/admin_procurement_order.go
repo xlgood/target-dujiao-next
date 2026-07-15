@@ -177,6 +177,44 @@ func (h *Handler) RetryProcurementOrder(c *gin.Context) {
 	response.Success(c, gin.H{"ok": true})
 }
 
+type resolveProcurementManualReviewRequest struct {
+	Resolution      string `json:"resolution" binding:"required"`
+	UpstreamOrderNo string `json:"upstream_order_no"`
+}
+
+// ResolveProcurementManualReview applies an operator-verified outcome to an ambiguous submit.
+func (h *Handler) ResolveProcurementManualReview(c *gin.Context) {
+	if h.ProcurementOrderService == nil {
+		shared.RespondErrorWithMsg(c, response.CodeInternal, "service not available", nil)
+		return
+	}
+	id, err := shared.ParseParamUint(c, "id")
+	if err != nil {
+		shared.RespondError(c, response.CodeBadRequest, "error.bad_request", err)
+		return
+	}
+	var req resolveProcurementManualReviewRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		shared.RespondError(c, response.CodeBadRequest, "error.bad_request", err)
+		return
+	}
+	err = h.ProcurementOrderService.ResolveManualReview(id, service.ResolveManualReviewInput{
+		Resolution: req.Resolution, UpstreamOrderNo: req.UpstreamOrderNo,
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrProcurementNotFound):
+			shared.RespondError(c, response.CodeNotFound, "error.procurement_not_found", nil)
+		case errors.Is(err, service.ErrProcurementManualReviewDenied):
+			shared.RespondErrorWithMsg(c, response.CodeBadRequest, err.Error(), nil)
+		default:
+			shared.RespondErrorWithMsg(c, response.CodeBadRequest, err.Error(), nil)
+		}
+		return
+	}
+	response.Success(c, gin.H{"ok": true})
+}
+
 // SyncProcurementOrderStatus 手动同步采购单状态
 func (h *Handler) SyncProcurementOrderStatus(c *gin.Context) {
 	if h.ProcurementOrderService == nil {

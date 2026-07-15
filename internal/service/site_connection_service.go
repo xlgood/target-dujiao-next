@@ -29,10 +29,12 @@ type MarkupReapplier interface {
 
 // SiteConnectionService 对接连接服务
 type SiteConnectionService struct {
-	connRepo        repository.SiteConnectionRepository
-	encryptKey      []byte
-	uploadsDir      string
-	markupReapplier MarkupReapplier
+	connRepo            repository.SiteConnectionRepository
+	balanceSnapshotRepo repository.ProviderBalanceSnapshotRepository
+	notificationSvc     *NotificationService
+	encryptKey          []byte
+	uploadsDir          string
+	markupReapplier     MarkupReapplier
 }
 
 // NewSiteConnectionService 创建连接服务
@@ -49,20 +51,29 @@ func (s *SiteConnectionService) SetMarkupReapplier(r MarkupReapplier) {
 	s.markupReapplier = r
 }
 
+func (s *SiteConnectionService) SetBalanceSnapshotRepository(repo repository.ProviderBalanceSnapshotRepository) {
+	s.balanceSnapshotRepo = repo
+}
+
+func (s *SiteConnectionService) SetNotificationService(svc *NotificationService) {
+	s.notificationSvc = svc
+}
+
 // CreateConnectionInput 创建连接输入
 type CreateConnectionInput struct {
-	Name               string  `json:"name"`
-	BaseURL            string  `json:"base_url"`
-	ApiKey             string  `json:"api_key"`
-	ApiSecret          string  `json:"api_secret"`
-	Protocol           string  `json:"protocol"`
-	CallbackURL        string  `json:"callback_url"`
-	RetryMax           int     `json:"retry_max"`
-	RetryIntervals     string  `json:"retry_intervals"`
-	ExchangeRate       float64 `json:"exchange_rate"`
-	PriceMarkupPercent float64 `json:"price_markup_percent"`
-	PriceRoundingMode  string  `json:"price_rounding_mode"`
-	AutoSyncPrice      bool    `json:"auto_sync_price"`
+	Name                string  `json:"name"`
+	BaseURL             string  `json:"base_url"`
+	ApiKey              string  `json:"api_key"`
+	ApiSecret           string  `json:"api_secret"`
+	Protocol            string  `json:"protocol"`
+	CallbackURL         string  `json:"callback_url"`
+	RetryMax            int     `json:"retry_max"`
+	RetryIntervals      string  `json:"retry_intervals"`
+	ExchangeRate        float64 `json:"exchange_rate"`
+	PriceMarkupPercent  float64 `json:"price_markup_percent"`
+	PriceRoundingMode   string  `json:"price_rounding_mode"`
+	AutoSyncPrice       bool    `json:"auto_sync_price"`
+	BalanceAlertMinimum float64 `json:"balance_alert_minimum"`
 }
 
 // Create 创建连接
@@ -103,19 +114,20 @@ func (s *SiteConnectionService) Create(input CreateConnectionInput) (*models.Sit
 	}
 
 	conn := &models.SiteConnection{
-		Name:               strings.TrimSpace(input.Name),
-		BaseURL:            strings.TrimRight(strings.TrimSpace(input.BaseURL), "/"),
-		ApiKey:             strings.TrimSpace(input.ApiKey),
-		ApiSecret:          encryptedSecret,
-		Protocol:           protocol,
-		CallbackURL:        strings.TrimSpace(input.CallbackURL),
-		Status:             constants.ConnectionStatusPending,
-		RetryMax:           retryMax,
-		RetryIntervals:     retryIntervals,
-		ExchangeRate:       s.normalizeExchangeRate(input.ExchangeRate),
-		PriceMarkupPercent: decimal.NewFromFloat(input.PriceMarkupPercent),
-		PriceRoundingMode:  roundingMode,
-		AutoSyncPrice:      input.AutoSyncPrice,
+		Name:                strings.TrimSpace(input.Name),
+		BaseURL:             strings.TrimRight(strings.TrimSpace(input.BaseURL), "/"),
+		ApiKey:              strings.TrimSpace(input.ApiKey),
+		ApiSecret:           encryptedSecret,
+		Protocol:            protocol,
+		CallbackURL:         strings.TrimSpace(input.CallbackURL),
+		Status:              constants.ConnectionStatusPending,
+		RetryMax:            retryMax,
+		RetryIntervals:      retryIntervals,
+		ExchangeRate:        s.normalizeExchangeRate(input.ExchangeRate),
+		PriceMarkupPercent:  decimal.NewFromFloat(input.PriceMarkupPercent),
+		PriceRoundingMode:   roundingMode,
+		AutoSyncPrice:       input.AutoSyncPrice,
+		BalanceAlertMinimum: normalizeBalanceAlertMinimum(input.BalanceAlertMinimum),
 	}
 
 	if err := s.connRepo.Create(conn); err != nil {
@@ -126,18 +138,19 @@ func (s *SiteConnectionService) Create(input CreateConnectionInput) (*models.Sit
 
 // UpdateConnectionInput 更新连接输入
 type UpdateConnectionInput struct {
-	Name               string   `json:"name"`
-	BaseURL            string   `json:"base_url"`
-	ApiKey             string   `json:"api_key"`
-	ApiSecret          string   `json:"api_secret"` // 为空则不更新
-	Protocol           string   `json:"protocol"`
-	CallbackURL        string   `json:"callback_url"`
-	RetryMax           int      `json:"retry_max"`
-	RetryIntervals     string   `json:"retry_intervals"`
-	ExchangeRate       *float64 `json:"exchange_rate"`
-	PriceMarkupPercent *float64 `json:"price_markup_percent"` // 指针类型，区分 0 和未传
-	PriceRoundingMode  *string  `json:"price_rounding_mode"`
-	AutoSyncPrice      *bool    `json:"auto_sync_price"`
+	Name                string   `json:"name"`
+	BaseURL             string   `json:"base_url"`
+	ApiKey              string   `json:"api_key"`
+	ApiSecret           string   `json:"api_secret"` // 为空则不更新
+	Protocol            string   `json:"protocol"`
+	CallbackURL         string   `json:"callback_url"`
+	RetryMax            int      `json:"retry_max"`
+	RetryIntervals      string   `json:"retry_intervals"`
+	ExchangeRate        *float64 `json:"exchange_rate"`
+	PriceMarkupPercent  *float64 `json:"price_markup_percent"` // 指针类型，区分 0 和未传
+	PriceRoundingMode   *string  `json:"price_rounding_mode"`
+	AutoSyncPrice       *bool    `json:"auto_sync_price"`
+	BalanceAlertMinimum *float64 `json:"balance_alert_minimum"`
 }
 
 // Update 更新连接
@@ -198,6 +211,9 @@ func (s *SiteConnectionService) Update(id uint, input UpdateConnectionInput) (*m
 	}
 	if input.AutoSyncPrice != nil {
 		conn.AutoSyncPrice = *input.AutoSyncPrice
+	}
+	if input.BalanceAlertMinimum != nil {
+		conn.BalanceAlertMinimum = normalizeBalanceAlertMinimum(*input.BalanceAlertMinimum)
 	}
 
 	if err := s.connRepo.Update(conn); err != nil {
@@ -280,9 +296,29 @@ func (s *SiteConnectionService) Ping(id uint) (*upstream.PingResult, error) {
 	case constants.ConnectionProtocolTGXAccount:
 		decrypted, err := s.decryptSecret(conn)
 		if err == nil {
-			connected, connectErr := upstream.NewTGXClient(conn.BaseURL, conn.ApiKey, decrypted).Connect(ctx)
+			var connected *upstream.TGXConnectResponse
+			var connectErr error
+			client := upstream.NewTGXClient(conn.BaseURL, conn.ApiKey, decrypted)
+			for attempt := 0; attempt <= tgxInventoryRetriesDefault; attempt++ {
+				if connectErr = waitForTGXRequest(ctx, conn.ID, tgxInventoryRateLimitDefault); connectErr != nil {
+					break
+				}
+				connected, connectErr = client.Connect(ctx)
+				if connectErr == nil && connected != nil {
+					break
+				}
+				if connectErr == nil {
+					connectErr = errors.New("empty TGX connect response")
+				}
+				if !isRetryableTGXInventoryError(connectErr) || attempt == tgxInventoryRetriesDefault {
+					break
+				}
+				if connectErr = waitTGXRetryBackoff(ctx, attempt); connectErr != nil {
+					break
+				}
+			}
 			if connectErr == nil {
-				result = &upstream.PingResult{SiteName: connected.ShopName, Balance: connected.Balance}
+				result = &upstream.PingResult{SiteName: connected.ShopName, Balance: connected.Balance, Currency: "CNY"}
 			}
 			pingErr = connectErr
 		} else {
@@ -307,6 +343,11 @@ func (s *SiteConnectionService) Ping(id uint) (*upstream.PingResult, error) {
 	now := time.Now()
 	conn.LastPingAt = &now
 	conn.LastPingOK = pingErr == nil
+	if pingErr == nil && result != nil {
+		conn.LastBalance = strings.TrimSpace(result.Balance)
+		conn.LastBalanceCurrency = strings.ToUpper(strings.TrimSpace(result.Currency))
+		conn.LastBalanceAt = &now
+	}
 
 	if pingErr == nil && conn.Status == constants.ConnectionStatusPending {
 		conn.Status = constants.ConnectionStatusActive
@@ -319,6 +360,63 @@ func (s *SiteConnectionService) Ping(id uint) (*upstream.PingResult, error) {
 		return nil, pingErr
 	}
 	return result, nil
+}
+
+// CheckActiveBalances records balance snapshots and alerts on provider failures or configured low balances.
+func (s *SiteConnectionService) CheckActiveBalances() {
+	connections, err := s.connRepo.ListActive()
+	if err != nil {
+		logger.Warnw("provider_balance_list_active_failed", "error", err)
+		return
+	}
+	for i := range connections {
+		conn := &connections[i]
+		if conn.Protocol != constants.ConnectionProtocolFansGurus && conn.Protocol != constants.ConnectionProtocolTGXAccount {
+			continue
+		}
+		var previous *models.ProviderBalanceSnapshot
+		if s.balanceSnapshotRepo != nil {
+			previous, _ = s.balanceSnapshotRepo.Latest(conn.ID)
+		}
+		result, pingErr := s.Ping(conn.ID)
+		snapshot := &models.ProviderBalanceSnapshot{ConnectionID: conn.ID, Status: "success", CheckedAt: time.Now()}
+		if pingErr != nil {
+			snapshot.Status, snapshot.ErrorMessage = "failed", pingErr.Error()
+		} else if result != nil {
+			snapshot.Balance, snapshot.Currency = result.Balance, result.Currency
+		}
+		low := false
+		if pingErr == nil && conn.BalanceAlertMinimum.GreaterThan(decimal.Zero) {
+			balance, parseErr := decimal.NewFromString(strings.TrimSpace(snapshot.Balance))
+			low = parseErr != nil || balance.LessThan(conn.BalanceAlertMinimum)
+		}
+		if low {
+			snapshot.Status = "low_balance"
+		}
+		if s.balanceSnapshotRepo != nil {
+			_ = s.balanceSnapshotRepo.Create(snapshot)
+		}
+		shouldAlert := pingErr != nil || low
+		if previous != nil && previous.Status == snapshot.Status && time.Since(previous.CheckedAt) < 30*time.Minute {
+			shouldAlert = false
+		}
+		if shouldAlert && s.notificationSvc != nil {
+			data := models.JSON{"connection_id": conn.ID, "connection_name": conn.Name, "balance": snapshot.Balance, "currency": snapshot.Currency}
+			if pingErr != nil {
+				data["error"] = pingErr.Error()
+			} else {
+				data["minimum"] = conn.BalanceAlertMinimum.String()
+			}
+			_ = s.notificationSvc.Enqueue(NotificationEnqueueInput{EventType: constants.NotificationEventExceptionAlert, BizType: constants.NotificationBizTypeProcurement, BizID: conn.ID, Data: data})
+		}
+	}
+}
+
+func normalizeBalanceAlertMinimum(value float64) decimal.Decimal {
+	if value <= 0 {
+		return decimal.Zero
+	}
+	return decimal.NewFromFloat(value).Round(2)
 }
 
 // GetAdapter 获取连接的适配器（解密 secret 后构建）
