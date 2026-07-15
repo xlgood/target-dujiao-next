@@ -293,17 +293,38 @@ func (s *ProductMappingService) markUpstreamUnavailable(mapping *models.ProductM
 	return nil
 }
 
-const upstreamStockSyncLockKey = "upstream:sync_stock_running"
+const (
+	upstreamStockSyncLockKey   = "upstream:sync_stock_running"
+	upstreamStockSyncLockGrace = 30 * time.Second
+)
 
-// IsUpstreamStockSyncRunning reports whether an inventory refresh currently
-// owns the distributed lock. Redis failures intentionally return false so an
-// operator can still submit a refresh instead of receiving a false busy state.
+// IsUpstreamStockSyncRunning reports whether an inventory refresh is actually
+// running. A legacy or crashed worker can leave a Redis lock behind; do not
+// make the admin UI wait indefinitely when no matching running record exists.
 func (s *ProductMappingService) IsUpstreamStockSyncRunning() bool {
 	if !cache.Enabled() {
 		return false
 	}
 	value, err := cache.GetString(context.Background(), upstreamStockSyncLockKey)
-	return err == nil && value != ""
+	if err != nil || value == "" {
+		return false
+	}
+
+	latest, latestErr := s.LatestTGXInventorySyncRun(0)
+	if latestErr == nil && latest != nil && latest.Status == "running" {
+		return true
+	}
+	lockedAt, parseErr := time.Parse(time.RFC3339Nano, value)
+	if parseErr == nil && time.Since(lockedAt) < upstreamStockSyncLockGrace {
+		// The worker may have acquired the lock just before it creates the run.
+		return true
+	}
+	if err := cache.Del(context.Background(), upstreamStockSyncLockKey); err != nil {
+		logger.Warnw("sync_stock_stale_lock_cleanup_failed", "error", err)
+		return true
+	}
+	logger.Warnw("sync_stock_stale_lock_cleared")
+	return false
 }
 
 // SyncAllStock 同步所有活跃映射的库存（供定时任务调用）
@@ -311,7 +332,7 @@ func (s *ProductMappingService) IsUpstreamStockSyncRunning() bool {
 func (s *ProductMappingService) SyncAllStock(cfg UpstreamSyncConfig) error {
 	ctx := context.Background()
 
-	locked, err := cache.SetNX(ctx, upstreamStockSyncLockKey, "1", 30*time.Minute)
+	locked, err := cache.SetNX(ctx, upstreamStockSyncLockKey, time.Now().UTC().Format(time.RFC3339Nano), 30*time.Minute)
 	if err != nil {
 		logger.Warnw("sync_stock_lock_error", "error", err)
 		// Redis 不可用时降级为直接执行
