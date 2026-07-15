@@ -463,7 +463,7 @@ func (s *ProductMappingService) ensureTGXInventoryForOrder(conn *models.SiteConn
 	}
 	inventory, err := s.getTGXInventoryWithRetry(ctx, conn.ID, client, sharedCode, race, cfg)
 	if err != nil {
-		if errors.Is(err, upstream.ErrTGXUnavailable) {
+		if isTGXUnavailableInventoryError(err) {
 			now := time.Now()
 			skuMapping.UpstreamStock = 0
 			skuMapping.UpstreamIsActive = false
@@ -552,7 +552,7 @@ func (s *ProductMappingService) RefreshTGXInventory(mappingID uint) error {
 		}
 		inventory, err := s.getTGXInventoryWithRetry(ctx, conn.ID, client, sharedCode, race, cfg)
 		if err != nil {
-			if errors.Is(err, upstream.ErrTGXUnavailable) {
+			if isTGXUnavailableInventoryError(err) {
 				skuMappings[i].StockSyncedAt = &now
 				skuMappings[i].UpstreamStock = 0
 				skuMappings[i].UpstreamIsActive = false
@@ -830,6 +830,7 @@ func (s *ProductMappingService) syncTGXConnectionStockWithConfig(conn *models.Si
 	client := upstream.NewTGXClient(conn.BaseURL, conn.ApiKey, appKey)
 	cfg = NormalizeUpstreamSyncConfig(cfg)
 	startedAt := time.Now()
+	run := s.startTGXInventorySyncRun(conn.ID, startedAt, len(skuMappings))
 	jobs := make(chan *models.SKUMapping)
 	results := make(chan tgxInventoryRefresh, len(skuMappings))
 	var wg sync.WaitGroup
@@ -845,7 +846,7 @@ func (s *ProductMappingService) syncTGXConnectionStockWithConfig(conn *models.Si
 				}
 				inventory, inventoryErr := s.getTGXInventoryWithRetry(context.Background(), conn.ID, client, sharedCode, race, cfg)
 				if inventoryErr != nil {
-					if errors.Is(inventoryErr, upstream.ErrTGXUnavailable) {
+					if isTGXUnavailableInventoryError(inventoryErr) {
 						results <- tgxInventoryRefresh{mapping: skuMapping, unavailable: true}
 						continue
 					}
@@ -897,7 +898,7 @@ func (s *ProductMappingService) syncTGXConnectionStockWithConfig(conn *models.Si
 		}
 		succeeded++
 	}
-	s.recordTGXInventorySyncRun(conn.ID, startedAt, len(skuMappings), succeeded, failedDetails)
+	s.recordTGXInventorySyncRun(run, conn.ID, startedAt, len(skuMappings), succeeded, failedDetails)
 	return errors.Join(errs...)
 }
 
@@ -928,14 +929,48 @@ func (s *ProductMappingService) getTGXInventoryWithRetry(ctx context.Context, co
 }
 
 func isRetryableTGXInventoryError(err error) bool {
-	if err == nil || errors.Is(err, upstream.ErrTGXAuth) || errors.Is(err, upstream.ErrTGXUnavailable) {
+	if err == nil || errors.Is(err, upstream.ErrTGXAuth) || isTGXUnavailableInventoryError(err) {
 		return false
 	}
 	message := strings.ToLower(err.Error())
 	return !strings.Contains(message, "invalid") && !strings.Contains(message, "not found")
 }
 
-func (s *ProductMappingService) recordTGXInventorySyncRun(connectionID uint, startedAt time.Time, total, succeeded int, failedDetails []map[string]interface{}) {
+// isTGXUnavailableInventoryError recognizes TGX's authoritative sold-out
+// responses even when a provider proxy strips the typed error wrapper.
+func isTGXUnavailableInventoryError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, upstream.ErrTGXUnavailable) {
+		return true
+	}
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "停售") ||
+		strings.Contains(message, "暂时缺货") ||
+		strings.Contains(message, "缺货") ||
+		strings.Contains(message, "out of stock") ||
+		strings.Contains(message, "sold out")
+}
+
+func (s *ProductMappingService) startTGXInventorySyncRun(connectionID uint, startedAt time.Time, total int) *models.TGXInventorySyncRun {
+	if s == nil || s.tgxSyncRunRepo == nil {
+		return nil
+	}
+	run := &models.TGXInventorySyncRun{
+		ConnectionID: connectionID,
+		Status:       "running",
+		Total:        total,
+		StartedAt:    startedAt,
+	}
+	if err := s.tgxSyncRunRepo.Create(run); err != nil {
+		logger.Warnw("tgx_inventory_sync_run_start_record_failed", "connection_id", connectionID, "error", err)
+		return nil
+	}
+	return run
+}
+
+func (s *ProductMappingService) recordTGXInventorySyncRun(run *models.TGXInventorySyncRun, connectionID uint, startedAt time.Time, total, succeeded int, failedDetails []map[string]interface{}) {
 	if s == nil {
 		return
 	}
@@ -962,7 +997,21 @@ func (s *ProductMappingService) recordTGXInventorySyncRun(connectionID uint, sta
 		alertStatus = "notification_unavailable"
 	}
 	if s.tgxSyncRunRepo != nil {
-		_ = s.tgxSyncRunRepo.Create(&models.TGXInventorySyncRun{ConnectionID: connectionID, Status: status, Total: total, Succeeded: succeeded, Failed: len(failedDetails), FailedDetails: models.JSON{"items": failedDetails}, AlertStatus: alertStatus, StartedAt: startedAt, FinishedAt: time.Now()})
+		if run == nil {
+			run = &models.TGXInventorySyncRun{ConnectionID: connectionID, StartedAt: startedAt}
+		}
+		run.Status = status
+		run.Total = total
+		run.Succeeded = succeeded
+		run.Failed = len(failedDetails)
+		run.FailedDetails = models.JSON{"items": failedDetails}
+		run.AlertStatus = alertStatus
+		run.FinishedAt = time.Now()
+		if run.ID == 0 {
+			_ = s.tgxSyncRunRepo.Create(run)
+		} else {
+			_ = s.tgxSyncRunRepo.Update(run)
+		}
 	}
 }
 

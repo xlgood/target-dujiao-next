@@ -7,6 +7,7 @@ import (
 
 type TGXInventorySyncRunRepository interface {
 	Create(run *models.TGXInventorySyncRun) error
+	Update(run *models.TGXInventorySyncRun) error
 	Latest(connectionID uint) (*models.TGXInventorySyncRun, error)
 	GetByID(id uint) (*models.TGXInventorySyncRun, error)
 	List(filter TGXInventorySyncRunListFilter) ([]models.TGXInventorySyncRun, int64, error)
@@ -37,6 +38,10 @@ func NewTGXInventorySyncRunRepository(db *gorm.DB) *GormTGXInventorySyncRunRepos
 
 func (r *GormTGXInventorySyncRunRepository) Create(run *models.TGXInventorySyncRun) error {
 	return r.db.Create(run).Error
+}
+
+func (r *GormTGXInventorySyncRunRepository) Update(run *models.TGXInventorySyncRun) error {
+	return r.db.Save(run).Error
 }
 
 func (r *GormTGXInventorySyncRunRepository) Latest(connectionID uint) (*models.TGXInventorySyncRun, error) {

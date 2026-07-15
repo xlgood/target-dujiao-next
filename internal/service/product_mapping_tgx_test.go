@@ -2,6 +2,7 @@ package service
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -13,6 +14,25 @@ import (
 
 	"github.com/shopspring/decimal"
 )
+
+func TestIsTGXUnavailableInventoryError(t *testing.T) {
+	for _, testCase := range []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{name: "typed", err: upstream.ErrTGXUnavailable, want: true},
+		{name: "wrapped message", err: errors.New("tgx request failed: code=0: 当前商品已停售"), want: true},
+		{name: "temporary out of stock", err: errors.New("tgx request failed: code=0: 该商品暂时缺货，请稍后再来"), want: true},
+		{name: "transport failure", err: errors.New("send tgx request: context deadline exceeded"), want: false},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			if got := isTGXUnavailableInventoryError(testCase.err); got != testCase.want {
+				t.Fatalf("isTGXUnavailableInventoryError(%v)=%v, want %v", testCase.err, got, testCase.want)
+			}
+		})
+	}
+}
 
 func TestProviderCatalogAmountsConvertsTGXCNYToUSD(t *testing.T) {
 	conn := &models.SiteConnection{
