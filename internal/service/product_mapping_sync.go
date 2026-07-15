@@ -901,11 +901,11 @@ func (s *ProductMappingService) syncTGXConnectionStockWithConfig(conn *models.Si
 			}
 		}()
 	}
-	for i := range skuMappings {
-		jobs <- &skuMappings[i]
-	}
-	close(jobs)
 	go func() {
+		for i := range skuMappings {
+			jobs <- &skuMappings[i]
+		}
+		close(jobs)
 		wg.Wait()
 		close(results)
 	}()
