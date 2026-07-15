@@ -1022,6 +1022,9 @@ func isTGXUnavailableInventoryError(err error) bool {
 	message := strings.ToLower(err.Error())
 	return strings.Contains(message, "停售") ||
 		strings.Contains(message, "商品不存在") ||
+		// Some TGX responses truncate this message while preserving its meaning.
+		strings.Contains(message, "商品不在") ||
+		strings.Contains(message, "商不存在") ||
 		strings.Contains(message, "product not found") ||
 		strings.Contains(message, "暂时缺货") ||
 		strings.Contains(message, "缺货") ||
