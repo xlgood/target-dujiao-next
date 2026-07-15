@@ -456,15 +456,17 @@ const (
 
 	SettingKeyOrderRiskControlConfig = "order_risk_control_config"
 
-	SettingKeyUpstreamSyncConfig        = "upstream_sync_config"
-	SettingFieldUpstreamSyncIntervalMin = "interval_minutes"
-	SettingFieldUpstreamPreOrderCheck   = "pre_order_stock_check_enabled"
-	SettingFieldUpstreamSyncPageSize    = "sync_page_size"
-	SettingFieldUpstreamSyncMaxPages    = "sync_max_pages"
-	SettingFieldUpstreamSyncConcurrency = "sync_conn_concurrency"
-	SettingFieldTGXInventoryConcurrency = "tgx_inventory_concurrency"
-	SettingFieldTGXInventoryRateLimit   = "tgx_inventory_rate_limit_per_second"
-	SettingFieldTGXInventoryRetries     = "tgx_inventory_retries"
+	SettingKeyUpstreamSyncConfig                = "upstream_sync_config"
+	SettingFieldUpstreamSyncIntervalMin         = "interval_minutes"
+	SettingFieldUpstreamPreOrderCheck           = "pre_order_stock_check_enabled"
+	SettingFieldUpstreamSyncPageSize            = "sync_page_size"
+	SettingFieldUpstreamSyncMaxPages            = "sync_max_pages"
+	SettingFieldUpstreamSyncConcurrency         = "sync_conn_concurrency"
+	SettingFieldTGXInventoryConcurrency         = "tgx_inventory_concurrency"
+	SettingFieldTGXInventoryRateLimit           = "tgx_inventory_rate_limit_per_second"
+	SettingFieldTGXInventoryRetries             = "tgx_inventory_retries"
+	SettingFieldTGXInventoryAlertFailurePercent = "tgx_inventory_alert_failure_percent"
+	SettingFieldTGXInventoryAlertCooldownMin    = "tgx_inventory_alert_cooldown_minutes"
 
 	SettingKeyCallbackRoutesConfig = "callback_routes_config"
 

@@ -1389,9 +1389,17 @@ func TestManualReviewRequiresControlledResolution(t *testing.T) {
 func TestManualReviewCanBindTGXOrder(t *testing.T) {
 	db := setupProcurementTestDB(t)
 	order := createProcTestOrder(t, db, "PROC-MANUAL-BIND-001", constants.OrderStatusFulfilling, constants.FulfillmentTypeUpstream)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/commodity/query" {
+			t.Fatalf("path=%s", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"code": 200, "data": map[string]string{"trade_no": "TGX-BOUND-1001", "status": "0"}})
+	}))
+	defer server.Close()
 	connSvc := NewSiteConnectionService(repository.NewSiteConnectionRepository(db), "test-key", t.TempDir())
 	conn, err := connSvc.Create(CreateConnectionInput{
-		Name: "TGX", BaseURL: "https://tgx.example", ApiKey: "app-id", ApiSecret: "app-key", Protocol: constants.ConnectionProtocolTGXAccount,
+		Name: "TGX", BaseURL: server.URL, ApiKey: "app-id", ApiSecret: "app-key", Protocol: constants.ConnectionProtocolTGXAccount,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -1406,8 +1414,34 @@ func TestManualReviewCanBindTGXOrder(t *testing.T) {
 	if err := db.First(&bound, proc.ID).Error; err != nil {
 		t.Fatal(err)
 	}
-	if bound.Status != constants.ProcurementStatusAccepted || bound.UpstreamOrderNo != "TGX-BOUND-1001" {
+	if bound.Status != constants.ProcurementStatusAccepted || bound.UpstreamOrderNo != "TGX-BOUND-1001" || bound.ManualReviewResolution != "bound_existing_upstream_order" {
 		t.Fatalf("bound procurement=%+v", bound)
+	}
+}
+
+func TestManualReviewRejectsUnknownTGXOrder(t *testing.T) {
+	db := setupProcurementTestDB(t)
+	order := createProcTestOrder(t, db, "PROC-MANUAL-BIND-MISSING-001", constants.OrderStatusFulfilling, constants.FulfillmentTypeUpstream)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"code": 404, "message": "not found"})
+	}))
+	defer server.Close()
+	connSvc := NewSiteConnectionService(repository.NewSiteConnectionRepository(db), "test-key", t.TempDir())
+	conn, err := connSvc.Create(CreateConnectionInput{Name: "TGX", BaseURL: server.URL, ApiKey: "app-id", ApiSecret: "app-key", Protocol: constants.ConnectionProtocolTGXAccount})
+	if err != nil {
+		t.Fatal(err)
+	}
+	proc := createTestProcurementOrder(t, db, conn.ID, order.ID, order.OrderNo, constants.ProcurementStatusManualReview)
+	if err := newTestProcurementService(db, connSvc).ResolveManualReview(proc.ID, ResolveManualReviewInput{Resolution: "bind", UpstreamOrderNo: "TGX-MISSING"}); err == nil {
+		t.Fatal("expected unknown TGX order binding to fail")
+	}
+	var unchanged models.ProcurementOrder
+	if err := db.First(&unchanged, proc.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if unchanged.Status != constants.ProcurementStatusManualReview {
+		t.Fatalf("status=%s, want manual_review", unchanged.Status)
 	}
 }
 

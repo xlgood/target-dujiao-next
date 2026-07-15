@@ -8,6 +8,25 @@ import (
 type TGXInventorySyncRunRepository interface {
 	Create(run *models.TGXInventorySyncRun) error
 	Latest(connectionID uint) (*models.TGXInventorySyncRun, error)
+	GetByID(id uint) (*models.TGXInventorySyncRun, error)
+	List(filter TGXInventorySyncRunListFilter) ([]models.TGXInventorySyncRun, int64, error)
+}
+
+func (r *GormTGXInventorySyncRunRepository) GetByID(id uint) (*models.TGXInventorySyncRun, error) {
+	var run models.TGXInventorySyncRun
+	if err := r.db.First(&run, id).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &run, nil
+}
+
+type TGXInventorySyncRunListFilter struct {
+	ConnectionID uint
+	Status       string
+	Pagination
 }
 
 type GormTGXInventorySyncRunRepository struct{ db *gorm.DB }
@@ -33,4 +52,23 @@ func (r *GormTGXInventorySyncRunRepository) Latest(connectionID uint) (*models.T
 		return nil, err
 	}
 	return &run, nil
+}
+
+func (r *GormTGXInventorySyncRunRepository) List(filter TGXInventorySyncRunListFilter) ([]models.TGXInventorySyncRun, int64, error) {
+	var runs []models.TGXInventorySyncRun
+	q := r.db.Model(&models.TGXInventorySyncRun{})
+	if filter.ConnectionID > 0 {
+		q = q.Where("connection_id = ?", filter.ConnectionID)
+	}
+	if filter.Status != "" {
+		q = q.Where("status = ?", filter.Status)
+	}
+	var total int64
+	if err := q.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	if err := applyPagination(q.Order("started_at DESC"), filter.Page, filter.PageSize).Find(&runs).Error; err != nil {
+		return nil, 0, err
+	}
+	return runs, total, nil
 }

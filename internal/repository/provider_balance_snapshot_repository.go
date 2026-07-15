@@ -10,6 +10,13 @@ import (
 type ProviderBalanceSnapshotRepository interface {
 	Create(snapshot *models.ProviderBalanceSnapshot) error
 	Latest(connectionID uint) (*models.ProviderBalanceSnapshot, error)
+	List(filter ProviderBalanceSnapshotListFilter) ([]models.ProviderBalanceSnapshot, int64, error)
+}
+
+type ProviderBalanceSnapshotListFilter struct {
+	ConnectionID uint
+	Status       string
+	Pagination
 }
 
 func (r *GormProviderBalanceSnapshotRepository) Latest(connectionID uint) (*models.ProviderBalanceSnapshot, error) {
@@ -31,4 +38,23 @@ func NewProviderBalanceSnapshotRepository(db *gorm.DB) *GormProviderBalanceSnaps
 
 func (r *GormProviderBalanceSnapshotRepository) Create(snapshot *models.ProviderBalanceSnapshot) error {
 	return r.db.Create(snapshot).Error
+}
+
+func (r *GormProviderBalanceSnapshotRepository) List(filter ProviderBalanceSnapshotListFilter) ([]models.ProviderBalanceSnapshot, int64, error) {
+	var snapshots []models.ProviderBalanceSnapshot
+	q := r.db.Model(&models.ProviderBalanceSnapshot{})
+	if filter.ConnectionID > 0 {
+		q = q.Where("connection_id = ?", filter.ConnectionID)
+	}
+	if filter.Status != "" {
+		q = q.Where("status = ?", filter.Status)
+	}
+	var total int64
+	if err := q.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	if err := applyPagination(q.Order("checked_at DESC"), filter.Page, filter.PageSize).Find(&snapshots).Error; err != nil {
+		return nil, 0, err
+	}
+	return snapshots, total, nil
 }

@@ -188,6 +188,8 @@ func (s *ProcurementOrderService) createProcurementForSingleOrder(order *models.
 				"procurement_order_id", procOrder.ID,
 				"error", err,
 			)
+		} else {
+			_ = s.procRepo.MarkSubmissionEnqueued(procOrder.ID, time.Now())
 		}
 	}
 
@@ -204,15 +206,23 @@ func (s *ProcurementOrderService) SubmitToUpstream(procurementOrderID uint) erro
 		return ErrProcurementNotFound
 	}
 
-	// 校验状态
+	// Only one worker may move a pending/failed order into submitted at once.
 	if procOrder.Status != "pending" && procOrder.Status != "failed" {
 		return ErrProcurementStatusInvalid
 	}
+	claimed, err := s.procRepo.ClaimForSubmission(procOrder.ID, time.Now())
+	if err != nil {
+		return fmt.Errorf("claim procurement submission: %w", err)
+	}
+	if !claimed {
+		return nil
+	}
+	procOrder.Status = constants.ProcurementStatusSubmitted
 
 	// 获取连接和适配器
 	conn, err := s.connSvc.GetByID(procOrder.ConnectionID)
 	if err != nil {
-		s.markProcurementError(procOrder, fmt.Sprintf("load connection failed: %v", err))
+		s.releaseSubmissionClaim(procOrder, fmt.Sprintf("load connection failed: %v", err))
 		return fmt.Errorf("load connection: %w", err)
 	}
 	if conn == nil {
@@ -237,7 +247,7 @@ func (s *ProcurementOrderService) SubmitToUpstream(procurementOrderID uint) erro
 	// 加载本地订单获取 SKU 信息
 	localOrder, err := s.orderRepo.GetByID(procOrder.LocalOrderID)
 	if err != nil {
-		s.markProcurementError(procOrder, fmt.Sprintf("load local order failed: %v", err))
+		s.releaseSubmissionClaim(procOrder, fmt.Sprintf("load local order failed: %v", err))
 		return fmt.Errorf("load local order: %w", err)
 	}
 	if localOrder == nil {
@@ -253,7 +263,7 @@ func (s *ProcurementOrderService) SubmitToUpstream(procurementOrderID uint) erro
 	// 查找 SKU 映射
 	skuMapping, err := s.skuMapRepo.GetByLocalSKUID(item.SKUID)
 	if err != nil {
-		s.markProcurementError(procOrder, fmt.Sprintf("lookup sku mapping failed: %v", err))
+		s.releaseSubmissionClaim(procOrder, fmt.Sprintf("lookup sku mapping failed: %v", err))
 		return fmt.Errorf("lookup sku mapping: %w", err)
 	}
 	if skuMapping == nil {
@@ -326,6 +336,16 @@ func (s *ProcurementOrderService) SubmitToUpstream(procurementOrderID uint) erro
 	}
 
 	return nil
+}
+
+func (s *ProcurementOrderService) releaseSubmissionClaim(procOrder *models.ProcurementOrder, errMsg string) {
+	if procOrder == nil {
+		return
+	}
+	_ = s.procRepo.UpdateStatus(procOrder.ID, constants.ProcurementStatusPending, map[string]interface{}{
+		"error_message": errMsg,
+		"updated_at":    time.Now(),
+	})
 }
 
 func (s *ProcurementOrderService) submitProviderProcurement(procOrder *models.ProcurementOrder, conn *models.SiteConnection) error {
@@ -819,9 +839,11 @@ func (s *ProcurementOrderService) handleSubmitFailure(procOrder *models.Procurem
 
 		// 入队重试
 		if s.queueClient != nil {
-			_ = s.queueClient.EnqueueProcurementSubmit(queue.ProcurementSubmitPayload{
+			if err := s.queueClient.EnqueueProcurementSubmit(queue.ProcurementSubmitPayload{
 				ProcurementOrderID: procOrder.ID,
-			}, asynq.ProcessIn(delay))
+			}, asynq.ProcessIn(delay)); err == nil {
+				_ = s.procRepo.MarkSubmissionEnqueued(procOrder.ID, now)
+			}
 		}
 
 		return nil
@@ -1223,6 +1245,98 @@ func (s *ProcurementOrderService) SyncAcceptedOrders() {
 		}
 	}
 }
+
+// RecoverPendingOrders recovers orders whose submission task was never enqueued
+// or whose worker disappeared before claiming it. Stale submitted orders are
+// deliberately moved to manual review rather than sent a second time.
+func (s *ProcurementOrderService) RecoverPendingOrders() {
+	const pageSize = 200
+	now := time.Now()
+	for _, procOrder := range s.listPendingSubmissionRecovery(now.Add(-10*time.Minute), pageSize) {
+		s.enqueueRecoveredProcurement(&procOrder, "pending submission recovery")
+	}
+	for _, procOrder := range s.listRetriableProcurements(now, pageSize) {
+		s.enqueueRecoveredProcurement(&procOrder, "scheduled retry")
+	}
+	// A submitted order has crossed the point where re-sending could duplicate a purchase.
+	s.requeuePendingProcurements(repository.ProcurementOrderListFilter{
+		Status: "submitted", CreatedTo: timePtr(now.Add(-10 * time.Minute)), Pagination: repository.Pagination{Page: 1, PageSize: pageSize},
+	})
+}
+
+func (s *ProcurementOrderService) requeuePendingProcurements(filter repository.ProcurementOrderListFilter) {
+	_, total, err := s.procRepo.List(filter)
+	if err != nil {
+		logger.Warnw("procurement_recovery_count_failed", "status", filter.Status, "error", err)
+		return
+	}
+	for page := int((total + int64(filter.PageSize) - 1) / int64(filter.PageSize)); page >= 1; page-- {
+		filter.Page = page
+		orders, _, listErr := s.procRepo.List(filter)
+		if listErr != nil {
+			logger.Warnw("procurement_recovery_list_failed", "status", filter.Status, "page", page, "error", listErr)
+			return
+		}
+		for i := range orders {
+			if filter.Status == constants.ProcurementStatusSubmitted {
+				s.markStaleSubmittedForReview(&orders[i])
+				continue
+			}
+			s.enqueueRecoveredProcurement(&orders[i], "pending submission recovery")
+		}
+	}
+}
+
+func (s *ProcurementOrderService) listPendingSubmissionRecovery(before time.Time, limit int) []models.ProcurementOrder {
+	orders, err := s.procRepo.ListPendingSubmissionRecovery(before, limit)
+	if err != nil {
+		logger.Warnw("procurement_recovery_pending_list_failed", "error", err)
+		return nil
+	}
+	return orders
+}
+
+func (s *ProcurementOrderService) listRetriableProcurements(now time.Time, limit int) []models.ProcurementOrder {
+	orders, err := s.procRepo.ListRetriable(now, limit)
+	if err != nil {
+		logger.Warnw("procurement_recovery_retriable_list_failed", "error", err)
+		return nil
+	}
+	return orders
+}
+
+func (s *ProcurementOrderService) enqueueRecoveredProcurement(procOrder *models.ProcurementOrder, reason string) {
+	if procOrder == nil {
+		return
+	}
+	if s.queueClient != nil {
+		if err := s.queueClient.EnqueueProcurementSubmit(queue.ProcurementSubmitPayload{ProcurementOrderID: procOrder.ID}); err == nil {
+			_ = s.procRepo.MarkSubmissionEnqueued(procOrder.ID, time.Now())
+			return
+		} else {
+			s.releaseSubmissionClaim(procOrder, fmt.Sprintf("%s enqueue failed: %v", reason, err))
+			s.notifyProcurementFailure(procOrder, fmt.Sprintf("%s enqueue failed: %v", reason, err))
+			return
+		}
+	}
+	s.notifyProcurementFailure(procOrder, reason+": procurement queue is unavailable")
+}
+
+func (s *ProcurementOrderService) markStaleSubmittedForReview(procOrder *models.ProcurementOrder) {
+	if procOrder == nil {
+		return
+	}
+	detail := "provider_submit_result_uncertain: submission remained in progress without a result"
+	if err := s.procRepo.UpdateStatus(procOrder.ID, constants.ProcurementStatusManualReview, map[string]interface{}{
+		"error_message": detail, "next_retry_at": nil, "updated_at": time.Now(),
+	}); err != nil {
+		logger.Warnw("procurement_stale_submission_manual_review_failed", "procurement_order_id", procOrder.ID, "error", err)
+		return
+	}
+	s.notifyProcurementFailure(procOrder, detail)
+}
+
+func timePtr(value time.Time) *time.Time { return &value }
 
 func (s *ProcurementOrderService) pollProviderStatus(ctx context.Context, procOrder *models.ProcurementOrder, conn *models.SiteConnection, requeue bool) error {
 	switch conn.Protocol {
@@ -1715,9 +1829,12 @@ func (s *ProcurementOrderService) RetryManual(id uint) error {
 	)
 
 	if s.queueClient != nil {
-		return s.queueClient.EnqueueProcurementSubmit(queue.ProcurementSubmitPayload{
+		if err := s.queueClient.EnqueueProcurementSubmit(queue.ProcurementSubmitPayload{
 			ProcurementOrderID: procOrder.ID,
-		})
+		}); err != nil {
+			return err
+		}
+		return s.procRepo.MarkSubmissionEnqueued(procOrder.ID, now)
 	}
 	return nil
 }
@@ -1746,13 +1863,16 @@ func (s *ProcurementOrderService) ResolveManualReview(id uint, input ResolveManu
 	case "not_created":
 		now := time.Now()
 		if err := s.procRepo.UpdateStatus(procOrder.ID, constants.ProcurementStatusPending, map[string]interface{}{
-			"retry_count": 0, "next_retry_at": nil, "error_message": "", "updated_at": now,
+			"retry_count": 0, "next_retry_at": nil, "error_message": "", "manual_review_resolution": "confirmed_not_created", "manual_review_resolved_at": &now, "updated_at": now,
 		}); err != nil {
 			return fmt.Errorf("resume procurement submit: %w", err)
 		}
 		logger.Warnw("procurement_manual_review_confirmed_not_created", "procurement_order_id", procOrder.ID)
 		if s.queueClient != nil {
-			return s.queueClient.EnqueueProcurementSubmit(queue.ProcurementSubmitPayload{ProcurementOrderID: procOrder.ID})
+			if err := s.queueClient.EnqueueProcurementSubmit(queue.ProcurementSubmitPayload{ProcurementOrderID: procOrder.ID}); err != nil {
+				return err
+			}
+			return s.procRepo.MarkSubmissionEnqueued(procOrder.ID, now)
 		}
 		return nil
 	case "bind":
@@ -1770,8 +1890,15 @@ func (s *ProcurementOrderService) bindManualReviewUpstreamOrder(procOrder *model
 	if err != nil {
 		return err
 	}
+	if conn == nil {
+		return ErrConnectionNotFound
+	}
+	if err := s.verifyManualReviewUpstreamOrder(conn, upstreamOrderNo); err != nil {
+		return fmt.Errorf("verify upstream order before binding: %w", err)
+	}
+	now := time.Now()
 	updates := map[string]interface{}{
-		"error_message": "", "retry_count": 0, "next_retry_at": nil, "updated_at": time.Now(),
+		"error_message": "", "retry_count": 0, "next_retry_at": nil, "manual_review_resolution": "bound_existing_upstream_order", "manual_review_resolved_at": &now, "updated_at": now,
 	}
 	switch conn.Protocol {
 	case constants.ConnectionProtocolFansGurus:
@@ -1795,6 +1922,48 @@ func (s *ProcurementOrderService) bindManualReviewUpstreamOrder(procOrder *model
 		_ = s.queueClient.EnqueueProcurementPollStatus(queue.ProcurementPollStatusPayload{ProcurementOrderID: procOrder.ID}, 5*time.Second)
 	}
 	return nil
+}
+
+func (s *ProcurementOrderService) verifyManualReviewUpstreamOrder(conn *models.SiteConnection, upstreamOrderNo string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	switch conn.Protocol {
+	case constants.ConnectionProtocolFansGurus:
+		orderID, err := strconv.ParseUint(upstreamOrderNo, 10, 64)
+		if err != nil || orderID == 0 {
+			return fmt.Errorf("fansgurus upstream order id must be a positive integer")
+		}
+		status, err := upstream.NewFansGurusClient(conn.BaseURL, conn.ApiKey).GetOrderStatus(ctx, uint(orderID))
+		if err != nil || status == nil {
+			if err != nil {
+				return err
+			}
+			return fmt.Errorf("empty fansgurus order status")
+		}
+		return nil
+	case constants.ConnectionProtocolTGXAccount:
+		appKey, err := s.connSvc.DecryptSecret(conn.ApiSecret)
+		if err != nil {
+			return err
+		}
+		cfg := DefaultUpstreamSyncConfig()
+		if s.settingService != nil {
+			cfg, _ = s.settingService.GetUpstreamSyncConfig("")
+		}
+		if err := waitForTGXRequest(ctx, conn.ID, cfg.TGXInventoryRateLimit); err != nil {
+			return err
+		}
+		status, err := upstream.NewTGXClient(conn.BaseURL, conn.ApiKey, appKey).QueryTrade(ctx, upstreamOrderNo)
+		if err != nil || status == nil || strings.TrimSpace(status.TradeNo) == "" {
+			if err != nil {
+				return err
+			}
+			return fmt.Errorf("TGX trade was not found")
+		}
+		return nil
+	default:
+		return fmt.Errorf("manual binding is unsupported for provider protocol %s", conn.Protocol)
+	}
 }
 
 // CancelManual 手动取消采购单

@@ -305,6 +305,7 @@ func (s *ProductMappingService) recordProviderCatalogSyncRun(startedAt time.Time
 		run.FilteredInactive = result.FilteredInactive
 		run.FilteredPlatform = result.FilteredPlatform
 		run.SupportedJSON = mustJSONMap("platforms", result.SupportedPlatforms)
+		run.FilterReasonsJSON = mustJSONMap("items", result.FilterReasons)
 	}
 	_ = s.syncRunRepo.Create(run)
 }

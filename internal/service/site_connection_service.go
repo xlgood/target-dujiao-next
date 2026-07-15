@@ -59,6 +59,13 @@ func (s *SiteConnectionService) SetNotificationService(svc *NotificationService)
 	s.notificationSvc = svc
 }
 
+func (s *SiteConnectionService) ListProviderBalanceSnapshots(filter repository.ProviderBalanceSnapshotListFilter) ([]models.ProviderBalanceSnapshot, int64, error) {
+	if s == nil || s.balanceSnapshotRepo == nil {
+		return []models.ProviderBalanceSnapshot{}, 0, nil
+	}
+	return s.balanceSnapshotRepo.List(filter)
+}
+
 // CreateConnectionInput 创建连接输入
 type CreateConnectionInput struct {
 	Name                string  `json:"name"`
@@ -393,12 +400,13 @@ func (s *SiteConnectionService) CheckActiveBalances() {
 		if low {
 			snapshot.Status = "low_balance"
 		}
-		if s.balanceSnapshotRepo != nil {
-			_ = s.balanceSnapshotRepo.Create(snapshot)
-		}
 		shouldAlert := pingErr != nil || low
+		alertStatus := "not_required"
 		if previous != nil && previous.Status == snapshot.Status && time.Since(previous.CheckedAt) < 30*time.Minute {
 			shouldAlert = false
+			if pingErr != nil || low {
+				alertStatus = "suppressed"
+			}
 		}
 		if shouldAlert && s.notificationSvc != nil {
 			data := models.JSON{"connection_id": conn.ID, "connection_name": conn.Name, "balance": snapshot.Balance, "currency": snapshot.Currency}
@@ -407,7 +415,17 @@ func (s *SiteConnectionService) CheckActiveBalances() {
 			} else {
 				data["minimum"] = conn.BalanceAlertMinimum.String()
 			}
-			_ = s.notificationSvc.Enqueue(NotificationEnqueueInput{EventType: constants.NotificationEventExceptionAlert, BizType: constants.NotificationBizTypeProcurement, BizID: conn.ID, Data: data})
+			if err := s.notificationSvc.Enqueue(NotificationEnqueueInput{EventType: constants.NotificationEventExceptionAlert, BizType: constants.NotificationBizTypeProcurement, BizID: conn.ID, Data: data}); err != nil {
+				alertStatus = "delivery_failed"
+			} else {
+				alertStatus = "sent"
+			}
+		} else if shouldAlert {
+			alertStatus = "notification_unavailable"
+		}
+		snapshot.AlertStatus = alertStatus
+		if s.balanceSnapshotRepo != nil {
+			_ = s.balanceSnapshotRepo.Create(snapshot)
 		}
 	}
 }

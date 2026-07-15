@@ -917,17 +917,58 @@ func (s *ProductMappingService) recordTGXInventorySyncRun(connectionID uint, sta
 	if succeeded == 0 && len(failedDetails) > 0 {
 		status = "failed"
 	}
-	if s.tgxSyncRunRepo != nil {
-		_ = s.tgxSyncRunRepo.Create(&models.TGXInventorySyncRun{ConnectionID: connectionID, Status: status, Total: total, Succeeded: succeeded, Failed: len(failedDetails), FailedDetails: models.JSON{"items": failedDetails}, StartedAt: startedAt, FinishedAt: time.Now()})
-	}
-	if len(failedDetails) > 0 && s.notificationSvc != nil {
-		_ = s.notificationSvc.Enqueue(NotificationEnqueueInput{
+	shouldAlert, alertStatus := s.tgxInventoryAlertDecision(connectionID, total, len(failedDetails))
+	if shouldAlert && s.notificationSvc != nil {
+		if err := s.notificationSvc.Enqueue(NotificationEnqueueInput{
 			EventType: constants.NotificationEventExceptionAlert,
 			BizType:   constants.NotificationBizTypeProcurement,
 			BizID:     connectionID,
 			Data:      models.JSON{"connection_id": connectionID, "sync_total": total, "sync_succeeded": succeeded, "sync_failed": len(failedDetails), "failed_items": failedDetails},
-		})
+		}); err != nil {
+			alertStatus = "delivery_failed"
+		} else {
+			alertStatus = "sent"
+		}
+	} else if shouldAlert {
+		alertStatus = "notification_unavailable"
 	}
+	if s.tgxSyncRunRepo != nil {
+		_ = s.tgxSyncRunRepo.Create(&models.TGXInventorySyncRun{ConnectionID: connectionID, Status: status, Total: total, Succeeded: succeeded, Failed: len(failedDetails), FailedDetails: models.JSON{"items": failedDetails}, AlertStatus: alertStatus, StartedAt: startedAt, FinishedAt: time.Now()})
+	}
+}
+
+func (s *ProductMappingService) tgxInventoryAlertDecision(connectionID uint, total, failed int) (bool, string) {
+	if total <= 0 || failed <= 0 {
+		return false, "not_required"
+	}
+	cfg := DefaultUpstreamSyncConfig()
+	if s.settingService != nil {
+		cfg, _ = s.settingService.GetUpstreamSyncConfig("")
+	}
+	if failed*100 < total*cfg.TGXInventoryAlertFailurePercent {
+		return false, "below_threshold"
+	}
+	key := fmt.Sprintf("tgx_inventory_alert:%d", connectionID)
+	ctx := context.Background()
+	cooldown := time.Duration(cfg.TGXInventoryAlertCooldownMinutes) * time.Minute
+	if cache.Enabled() {
+		if cached, err := cache.GetString(ctx, key); err != nil || cached != "" {
+			return false, "suppressed"
+		}
+		if err := cache.SetString(ctx, key, "1", cooldown); err != nil {
+			return false, "suppressed"
+		}
+		return true, "pending"
+	}
+	// Redis is optional in local and single-instance deployments. Keep an
+	// in-process cooldown so a failed batch cannot produce an alert every run.
+	s.tgxAlertMu.Lock()
+	defer s.tgxAlertMu.Unlock()
+	if until := s.tgxAlertUntil[connectionID]; until.After(time.Now()) {
+		return false, "suppressed"
+	}
+	s.tgxAlertUntil[connectionID] = time.Now().Add(cooldown)
+	return true, "pending"
 }
 
 // syncProductFromData 使用已拉取的上游数据同步单个映射（不再发 HTTP 请求）

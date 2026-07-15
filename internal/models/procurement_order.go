@@ -21,6 +21,9 @@ type ProcurementOrder struct {
 	LocalSellAmount          Money          `gorm:"type:decimal(20,2);not null;default:0" json:"local_sell_amount"`
 	Currency                 string         `gorm:"type:varchar(10);not null" json:"currency"` // 本地货币代码
 	ErrorMessage             string         `gorm:"type:text" json:"error_message,omitempty"`
+	ManualReviewResolution   string         `gorm:"type:varchar(32)" json:"manual_review_resolution,omitempty"`
+	ManualReviewResolvedAt   *time.Time     `json:"manual_review_resolved_at,omitempty"`
+	SubmissionEnqueuedAt     *time.Time     `gorm:"index" json:"submission_enqueued_at,omitempty"`
 	RetryCount               int            `gorm:"not null;default:0" json:"retry_count"`
 	NextRetryAt              *time.Time     `gorm:"index" json:"next_retry_at,omitempty"`
 	UpstreamPayload          string         `gorm:"type:text" json:"upstream_payload,omitempty"`

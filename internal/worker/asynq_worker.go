@@ -487,6 +487,7 @@ func (c *Consumer) handleProcurementSyncAccepted(_ context.Context, _ *asynq.Tas
 		return nil
 	}
 	c.ProcurementOrderService.SyncAcceptedOrders()
+	c.ProcurementOrderService.RecoverPendingOrders()
 	return nil
 }
 

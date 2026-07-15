@@ -538,13 +538,18 @@ func SetupRouter(cfg *config.Config, c *provider.Container) *gin.Engine {
 				authorized.POST("/site-connections/:id/ping", adminHandler.PingSiteConnection)
 				authorized.PUT("/site-connections/:id/status", adminHandler.UpdateSiteConnectionStatus)
 				authorized.POST("/site-connections/:id/reapply-markup", adminHandler.ReapplyConnectionMarkup)
+				authorized.GET("/site-connections/balance-snapshots", adminHandler.ListProviderBalanceSnapshots)
 
 				// Provider 商品目录同步
 				authorized.POST("/provider-catalog/sync", adminHandler.SyncProviderCatalog)
+				authorized.GET("/provider-catalog/sync-runs", adminHandler.ListProviderCatalogSyncRuns)
+				authorized.GET("/provider-catalog/sync-runs/:id/filter-reasons.csv", adminHandler.ExportProviderCatalogFilterReasons)
 
 				// 商品映射管理
 				authorized.GET("/product-mappings", adminHandler.GetProductMappings)
 				authorized.GET("/product-mappings/tgx-inventory-health", adminHandler.GetTGXInventorySyncHealth)
+				authorized.GET("/product-mappings/tgx-inventory-runs", adminHandler.ListTGXInventorySyncRuns)
+				authorized.GET("/product-mappings/tgx-inventory-runs/:id/failed-items.csv", adminHandler.ExportTGXInventorySyncRunFailures)
 				authorized.GET("/product-mappings/:id", adminHandler.GetProductMapping)
 				authorized.POST("/product-mappings/import", adminHandler.ImportUpstreamProduct)
 				authorized.POST("/product-mappings/batch-import", adminHandler.BatchImportUpstreamProducts)

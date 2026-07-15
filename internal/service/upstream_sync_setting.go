@@ -13,48 +13,58 @@ const (
 	upstreamSyncIntervalMinMin     = 5
 	upstreamSyncIntervalMinMax     = 1440 // 24h 上限，避免误填超长间隔
 
-	upstreamSyncPageSizeDefault    = 50
-	upstreamSyncPageSizeMin        = 10
-	upstreamSyncPageSizeMax        = 200
-	upstreamSyncMaxPagesDefault    = 200
-	upstreamSyncMaxPagesMin        = 10
-	upstreamSyncMaxPagesMax        = 500
-	upstreamSyncConnConcurrencyDef = 3
-	upstreamSyncConnConcurrencyMin = 1
-	upstreamSyncConnConcurrencyMax = 10
-	tgxInventoryConcurrencyDefault = 4
-	tgxInventoryConcurrencyMin     = 1
-	tgxInventoryConcurrencyMax     = 10
-	tgxInventoryRateLimitDefault   = 4
-	tgxInventoryRateLimitMin       = 1
-	tgxInventoryRateLimitMax       = 20
-	tgxInventoryRetriesDefault     = 2
-	tgxInventoryRetriesMax         = 5
+	upstreamSyncPageSizeDefault            = 50
+	upstreamSyncPageSizeMin                = 10
+	upstreamSyncPageSizeMax                = 200
+	upstreamSyncMaxPagesDefault            = 200
+	upstreamSyncMaxPagesMin                = 10
+	upstreamSyncMaxPagesMax                = 500
+	upstreamSyncConnConcurrencyDef         = 3
+	upstreamSyncConnConcurrencyMin         = 1
+	upstreamSyncConnConcurrencyMax         = 10
+	tgxInventoryConcurrencyDefault         = 4
+	tgxInventoryConcurrencyMin             = 1
+	tgxInventoryConcurrencyMax             = 10
+	tgxInventoryRateLimitDefault           = 4
+	tgxInventoryRateLimitMin               = 1
+	tgxInventoryRateLimitMax               = 20
+	tgxInventoryRetriesDefault             = 2
+	tgxInventoryRetriesMax                 = 5
+	tgxInventoryAlertFailurePercentDefault = 50
+	tgxInventoryAlertFailurePercentMin     = 1
+	tgxInventoryAlertFailurePercentMax     = 100
+	tgxInventoryAlertCooldownMinDefault    = 30
+	tgxInventoryAlertCooldownMinMin        = 5
+	tgxInventoryAlertCooldownMinMax        = 1440
 )
 
 // UpstreamSyncConfig 上游同步配置。
 type UpstreamSyncConfig struct {
-	IntervalMinutes           int  `json:"interval_minutes"`
-	PreOrderStockCheckEnabled bool `json:"pre_order_stock_check_enabled"`
-	SyncPageSize              int  `json:"sync_page_size"`
-	SyncMaxPages              int  `json:"sync_max_pages"`
-	SyncConnConcurrency       int  `json:"sync_conn_concurrency"`
-	TGXInventoryConcurrency   int  `json:"tgx_inventory_concurrency"`
-	TGXInventoryRateLimit     int  `json:"tgx_inventory_rate_limit_per_second"`
-	TGXInventoryRetries       int  `json:"tgx_inventory_retries"`
+	IntervalMinutes                  int  `json:"interval_minutes"`
+	PreOrderStockCheckEnabled        bool `json:"pre_order_stock_check_enabled"`
+	SyncPageSize                     int  `json:"sync_page_size"`
+	SyncMaxPages                     int  `json:"sync_max_pages"`
+	SyncConnConcurrency              int  `json:"sync_conn_concurrency"`
+	TGXInventoryConcurrency          int  `json:"tgx_inventory_concurrency"`
+	TGXInventoryRateLimit            int  `json:"tgx_inventory_rate_limit_per_second"`
+	TGXInventoryRetries              int  `json:"tgx_inventory_retries"`
+	TGXInventoryAlertFailurePercent  int  `json:"tgx_inventory_alert_failure_percent"`
+	TGXInventoryAlertCooldownMinutes int  `json:"tgx_inventory_alert_cooldown_minutes"`
 }
 
 // DefaultUpstreamSyncConfig 默认上游同步配置。
 func DefaultUpstreamSyncConfig() UpstreamSyncConfig {
 	return UpstreamSyncConfig{
-		IntervalMinutes:           upstreamSyncIntervalMinDefault,
-		PreOrderStockCheckEnabled: true,
-		SyncPageSize:              upstreamSyncPageSizeDefault,
-		SyncMaxPages:              upstreamSyncMaxPagesDefault,
-		SyncConnConcurrency:       upstreamSyncConnConcurrencyDef,
-		TGXInventoryConcurrency:   tgxInventoryConcurrencyDefault,
-		TGXInventoryRateLimit:     tgxInventoryRateLimitDefault,
-		TGXInventoryRetries:       tgxInventoryRetriesDefault,
+		IntervalMinutes:                  upstreamSyncIntervalMinDefault,
+		PreOrderStockCheckEnabled:        true,
+		SyncPageSize:                     upstreamSyncPageSizeDefault,
+		SyncMaxPages:                     upstreamSyncMaxPagesDefault,
+		SyncConnConcurrency:              upstreamSyncConnConcurrencyDef,
+		TGXInventoryConcurrency:          tgxInventoryConcurrencyDefault,
+		TGXInventoryRateLimit:            tgxInventoryRateLimitDefault,
+		TGXInventoryRetries:              tgxInventoryRetriesDefault,
+		TGXInventoryAlertFailurePercent:  tgxInventoryAlertFailurePercentDefault,
+		TGXInventoryAlertCooldownMinutes: tgxInventoryAlertCooldownMinDefault,
 	}
 }
 
@@ -93,6 +103,12 @@ func NormalizeUpstreamSyncConfig(cfg UpstreamSyncConfig) UpstreamSyncConfig {
 	if cfg.TGXInventoryRetries < 0 || cfg.TGXInventoryRetries > tgxInventoryRetriesMax {
 		cfg.TGXInventoryRetries = tgxInventoryRetriesDefault
 	}
+	if cfg.TGXInventoryAlertFailurePercent < tgxInventoryAlertFailurePercentMin || cfg.TGXInventoryAlertFailurePercent > tgxInventoryAlertFailurePercentMax {
+		cfg.TGXInventoryAlertFailurePercent = tgxInventoryAlertFailurePercentDefault
+	}
+	if cfg.TGXInventoryAlertCooldownMinutes < tgxInventoryAlertCooldownMinMin || cfg.TGXInventoryAlertCooldownMinutes > tgxInventoryAlertCooldownMinMax {
+		cfg.TGXInventoryAlertCooldownMinutes = tgxInventoryAlertCooldownMinDefault
+	}
 	return cfg
 }
 
@@ -126,6 +142,12 @@ func upstreamSyncConfigFromJSON(raw models.JSON, fallback UpstreamSyncConfig) Up
 	if v, err := parseSettingInt(raw[constants.SettingFieldTGXInventoryRetries]); err == nil {
 		result.TGXInventoryRetries = v
 	}
+	if v, err := parseSettingInt(raw[constants.SettingFieldTGXInventoryAlertFailurePercent]); err == nil {
+		result.TGXInventoryAlertFailurePercent = v
+	}
+	if v, err := parseSettingInt(raw[constants.SettingFieldTGXInventoryAlertCooldownMin]); err == nil {
+		result.TGXInventoryAlertCooldownMinutes = v
+	}
 	return NormalizeUpstreamSyncConfig(result)
 }
 
@@ -133,14 +155,16 @@ func upstreamSyncConfigFromJSON(raw models.JSON, fallback UpstreamSyncConfig) Up
 func UpstreamSyncConfigToMap(cfg UpstreamSyncConfig) models.JSON {
 	normalized := NormalizeUpstreamSyncConfig(cfg)
 	return models.JSON{
-		constants.SettingFieldUpstreamSyncIntervalMin: normalized.IntervalMinutes,
-		constants.SettingFieldUpstreamPreOrderCheck:   normalized.PreOrderStockCheckEnabled,
-		constants.SettingFieldUpstreamSyncPageSize:    normalized.SyncPageSize,
-		constants.SettingFieldUpstreamSyncMaxPages:    normalized.SyncMaxPages,
-		constants.SettingFieldUpstreamSyncConcurrency: normalized.SyncConnConcurrency,
-		constants.SettingFieldTGXInventoryConcurrency: normalized.TGXInventoryConcurrency,
-		constants.SettingFieldTGXInventoryRateLimit:   normalized.TGXInventoryRateLimit,
-		constants.SettingFieldTGXInventoryRetries:     normalized.TGXInventoryRetries,
+		constants.SettingFieldUpstreamSyncIntervalMin:         normalized.IntervalMinutes,
+		constants.SettingFieldUpstreamPreOrderCheck:           normalized.PreOrderStockCheckEnabled,
+		constants.SettingFieldUpstreamSyncPageSize:            normalized.SyncPageSize,
+		constants.SettingFieldUpstreamSyncMaxPages:            normalized.SyncMaxPages,
+		constants.SettingFieldUpstreamSyncConcurrency:         normalized.SyncConnConcurrency,
+		constants.SettingFieldTGXInventoryConcurrency:         normalized.TGXInventoryConcurrency,
+		constants.SettingFieldTGXInventoryRateLimit:           normalized.TGXInventoryRateLimit,
+		constants.SettingFieldTGXInventoryRetries:             normalized.TGXInventoryRetries,
+		constants.SettingFieldTGXInventoryAlertFailurePercent: normalized.TGXInventoryAlertFailurePercent,
+		constants.SettingFieldTGXInventoryAlertCooldownMin:    normalized.TGXInventoryAlertCooldownMinutes,
 	}
 }
 

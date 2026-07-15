@@ -18,6 +18,9 @@ type ProcurementOrderRepository interface {
 	Create(order *models.ProcurementOrder) error
 	Update(order *models.ProcurementOrder) error
 	UpdateStatus(id uint, status string, updates map[string]interface{}) error
+	ClaimForSubmission(id uint, now time.Time) (bool, error)
+	MarkSubmissionEnqueued(id uint, at time.Time) error
+	ListPendingSubmissionRecovery(before time.Time, limit int) ([]models.ProcurementOrder, error)
 	List(filter ProcurementOrderListFilter) ([]models.ProcurementOrder, int64, error)
 	StatsByStatus(filter ProcurementOrderListFilter) (map[string]int64, error)
 	ListRetriable(now time.Time, limit int) ([]models.ProcurementOrder, error)
@@ -126,6 +129,31 @@ func (r *GormProcurementOrderRepository) UpdateStatus(id uint, status string, up
 	}
 	updates["status"] = status
 	return r.db.Model(&models.ProcurementOrder{}).Where("id = ?", id).Updates(updates).Error
+}
+
+// ClaimForSubmission atomically prevents duplicate workers from submitting one procurement order twice.
+func (r *GormProcurementOrderRepository) ClaimForSubmission(id uint, now time.Time) (bool, error) {
+	result := r.db.Model(&models.ProcurementOrder{}).
+		Where("id = ? AND (status = ? OR (status = ? AND (next_retry_at IS NULL OR next_retry_at <= ?)))", id, "pending", "failed", now).
+		Updates(map[string]interface{}{"status": "submitted", "updated_at": now, "next_retry_at": nil})
+	return result.RowsAffected == 1, result.Error
+}
+
+func (r *GormProcurementOrderRepository) MarkSubmissionEnqueued(id uint, at time.Time) error {
+	return r.db.Model(&models.ProcurementOrder{}).Where("id = ?", id).Updates(map[string]interface{}{
+		"submission_enqueued_at": at,
+		"updated_at":             at,
+	}).Error
+}
+
+func (r *GormProcurementOrderRepository) ListPendingSubmissionRecovery(before time.Time, limit int) ([]models.ProcurementOrder, error) {
+	var orders []models.ProcurementOrder
+	q := r.db.Where("status = ? AND (submission_enqueued_at IS NULL OR submission_enqueued_at < ?)", "pending", before).
+		Order("created_at ASC")
+	if limit > 0 {
+		q = q.Limit(limit)
+	}
+	return orders, q.Find(&orders).Error
 }
 
 // List 列表查询

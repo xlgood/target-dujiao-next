@@ -212,6 +212,19 @@ func (h *Handler) ResolveProcurementManualReview(c *gin.Context) {
 		}
 		return
 	}
+	h.recordAuthzAudit(c, service.AuthzAuditRecordInput{
+		OperatorAdminID:  c.GetUint("admin_id"),
+		OperatorUsername: c.GetString("username"),
+		Action:           "procurement_manual_review_resolve",
+		Object:           "procurement_order",
+		Method:           c.Request.Method,
+		RequestID:        strings.TrimSpace(c.GetString("request_id")),
+		Detail: models.JSON{
+			"procurement_order_id": id,
+			"resolution":           strings.ToLower(strings.TrimSpace(req.Resolution)),
+			"upstream_order_no":    strings.TrimSpace(req.UpstreamOrderNo),
+		},
+	})
 	response.Success(c, gin.H{"ok": true})
 }
 

@@ -4,6 +4,8 @@ import (
 	"errors"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/dujiao-next/internal/constants"
 	"github.com/dujiao-next/internal/models"
@@ -42,6 +44,8 @@ type ProductMappingService struct {
 	syncRunRepo     repository.ProviderCatalogSyncRunRepository
 	tgxSyncRunRepo  repository.TGXInventorySyncRunRepository
 	notificationSvc *NotificationService
+	tgxAlertMu      sync.Mutex
+	tgxAlertUntil   map[uint]time.Time
 }
 
 // NewProductMappingService 创建商品映射服务
@@ -60,6 +64,7 @@ func NewProductMappingService(
 		productSKURepo: productSKURepo,
 		categoryRepo:   categoryRepo,
 		connService:    connService,
+		tgxAlertUntil:  make(map[uint]time.Time),
 	}
 }
 
@@ -95,6 +100,34 @@ func (s *ProductMappingService) LatestTGXInventorySyncRun(connectionID uint) (*m
 		return nil, nil
 	}
 	return s.tgxSyncRunRepo.Latest(connectionID)
+}
+
+func (s *ProductMappingService) ListTGXInventorySyncRuns(filter repository.TGXInventorySyncRunListFilter) ([]models.TGXInventorySyncRun, int64, error) {
+	if s == nil || s.tgxSyncRunRepo == nil {
+		return []models.TGXInventorySyncRun{}, 0, nil
+	}
+	return s.tgxSyncRunRepo.List(filter)
+}
+
+func (s *ProductMappingService) GetTGXInventorySyncRun(id uint) (*models.TGXInventorySyncRun, error) {
+	if s == nil || s.tgxSyncRunRepo == nil {
+		return nil, nil
+	}
+	return s.tgxSyncRunRepo.GetByID(id)
+}
+
+func (s *ProductMappingService) ListProviderCatalogSyncRuns(filter repository.ProviderCatalogSyncRunListFilter) ([]models.ProviderCatalogSyncRun, int64, error) {
+	if s == nil || s.syncRunRepo == nil {
+		return []models.ProviderCatalogSyncRun{}, 0, nil
+	}
+	return s.syncRunRepo.List(filter)
+}
+
+func (s *ProductMappingService) GetProviderCatalogSyncRun(id uint) (*models.ProviderCatalogSyncRun, error) {
+	if s == nil || s.syncRunRepo == nil {
+		return nil, nil
+	}
+	return s.syncRunRepo.GetByID(id)
 }
 
 // GetByID 获取映射详情

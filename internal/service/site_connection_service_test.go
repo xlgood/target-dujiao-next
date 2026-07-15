@@ -188,6 +188,20 @@ func (r *balanceSnapshotRepoStub) Latest(connectionID uint) (*models.ProviderBal
 	return nil, nil
 }
 
+func (r *balanceSnapshotRepoStub) List(filter repository.ProviderBalanceSnapshotListFilter) ([]models.ProviderBalanceSnapshot, int64, error) {
+	result := make([]models.ProviderBalanceSnapshot, 0)
+	for _, snapshot := range r.snapshots {
+		if filter.ConnectionID > 0 && snapshot.ConnectionID != filter.ConnectionID {
+			continue
+		}
+		if filter.Status != "" && snapshot.Status != filter.Status {
+			continue
+		}
+		result = append(result, snapshot)
+	}
+	return result, int64(len(result)), nil
+}
+
 func (r *siteConnectionRepoStub) GetByID(id uint) (*models.SiteConnection, error) {
 	if r.conn != nil && r.conn.ID == id {
 		copy := *r.conn
