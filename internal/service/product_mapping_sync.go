@@ -463,6 +463,16 @@ func (s *ProductMappingService) ensureTGXInventoryForOrder(conn *models.SiteConn
 	}
 	inventory, err := s.getTGXInventoryWithRetry(ctx, conn.ID, client, sharedCode, race, cfg)
 	if err != nil {
+		if errors.Is(err, upstream.ErrTGXUnavailable) {
+			now := time.Now()
+			skuMapping.UpstreamStock = 0
+			skuMapping.UpstreamIsActive = false
+			skuMapping.StockSyncedAt = &now
+			if updateErr := s.skuMappingRepo.Update(skuMapping); updateErr != nil {
+				return updateErr
+			}
+			return ErrUpstreamStockInsufficient
+		}
 		return err
 	}
 	if err := waitForTGXRequest(ctx, conn.ID, cfg.TGXInventoryRateLimit); err != nil {
@@ -542,6 +552,15 @@ func (s *ProductMappingService) RefreshTGXInventory(mappingID uint) error {
 		}
 		inventory, err := s.getTGXInventoryWithRetry(ctx, conn.ID, client, sharedCode, race, cfg)
 		if err != nil {
+			if errors.Is(err, upstream.ErrTGXUnavailable) {
+				skuMappings[i].StockSyncedAt = &now
+				skuMappings[i].UpstreamStock = 0
+				skuMappings[i].UpstreamIsActive = false
+				if updateErr := s.skuMappingRepo.Update(&skuMappings[i]); updateErr != nil {
+					return updateErr
+				}
+				continue
+			}
 			return fmt.Errorf("get TGX inventory for %s: %w", sharedCode, err)
 		}
 		skuMappings[i].StockSyncedAt = &now
@@ -774,9 +793,10 @@ func (s *ProductMappingService) syncConnectionStock(connectionID uint, connMappi
 }
 
 type tgxInventoryRefresh struct {
-	mapping *models.SKUMapping
-	count   int
-	err     error
+	mapping     *models.SKUMapping
+	count       int
+	unavailable bool
+	err         error
 }
 
 // syncTGXConnectionStock refreshes every TGX SKU directly from the TGX
@@ -825,6 +845,10 @@ func (s *ProductMappingService) syncTGXConnectionStockWithConfig(conn *models.Si
 				}
 				inventory, inventoryErr := s.getTGXInventoryWithRetry(context.Background(), conn.ID, client, sharedCode, race, cfg)
 				if inventoryErr != nil {
+					if errors.Is(inventoryErr, upstream.ErrTGXUnavailable) {
+						results <- tgxInventoryRefresh{mapping: skuMapping, unavailable: true}
+						continue
+					}
 					results <- tgxInventoryRefresh{mapping: skuMapping, err: inventoryErr}
 					continue
 				}
@@ -858,8 +882,13 @@ func (s *ProductMappingService) syncTGXConnectionStockWithConfig(conn *models.Si
 			})
 			continue
 		}
-		result.mapping.UpstreamStock = result.count
-		result.mapping.UpstreamIsActive = result.count > 0
+		if result.unavailable {
+			result.mapping.UpstreamStock = 0
+			result.mapping.UpstreamIsActive = false
+		} else {
+			result.mapping.UpstreamStock = result.count
+			result.mapping.UpstreamIsActive = result.count > 0
+		}
 		result.mapping.StockSyncedAt = &now
 		if err := s.skuMappingRepo.Update(result.mapping); err != nil {
 			errs = append(errs, err)
@@ -899,7 +928,7 @@ func (s *ProductMappingService) getTGXInventoryWithRetry(ctx context.Context, co
 }
 
 func isRetryableTGXInventoryError(err error) bool {
-	if err == nil || errors.Is(err, upstream.ErrTGXAuth) {
+	if err == nil || errors.Is(err, upstream.ErrTGXAuth) || errors.Is(err, upstream.ErrTGXUnavailable) {
 		return false
 	}
 	message := strings.ToLower(err.Error())

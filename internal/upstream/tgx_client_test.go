@@ -284,6 +284,19 @@ func TestTGXClientRejectsDocumentedCodeZeroError(t *testing.T) {
 	}
 }
 
+func TestTGXClientClassifiesUnavailableCommodity(t *testing.T) {
+	server := newTGXTestServer(t, func(r *http.Request) interface{} {
+		assertTGXPath(t, r, "/commodity/inventory")
+		return map[string]interface{}{"code": 0, "msg": "该商品暂时缺货，请稍后再来"}
+	})
+	defer server.Close()
+
+	_, err := NewTGXClient(server.URL, "test-app-id", "app-secret").GetInventory(context.Background(), "TGX-001", "")
+	if !errors.Is(err, ErrTGXUnavailable) {
+		t.Fatalf("error=%v, want ErrTGXUnavailable", err)
+	}
+}
+
 func TestTGXClientBadJSON(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

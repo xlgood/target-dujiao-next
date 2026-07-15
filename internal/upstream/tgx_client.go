@@ -22,11 +22,14 @@ import (
 const defaultTGXBaseURL = "https://www.tgxaccount.com/shared"
 
 var (
-	ErrTGXAuth       = errors.New("tgx auth error")
-	ErrTGXBusiness   = errors.New("tgx business error")
-	ErrTGXStock      = errors.New("tgx stock insufficient")
-	ErrTGXBadJSON    = errors.New("tgx bad json")
-	ErrTGXBadPayload = errors.New("tgx bad payload")
+	ErrTGXAuth     = errors.New("tgx auth error")
+	ErrTGXBusiness = errors.New("tgx business error")
+	// ErrTGXUnavailable means TGX has authoritatively reported that a
+	// commodity is sold out or discontinued, rather than a request failure.
+	ErrTGXUnavailable = errors.New("tgx commodity unavailable")
+	ErrTGXStock       = errors.New("tgx stock insufficient")
+	ErrTGXBadJSON     = errors.New("tgx bad json")
+	ErrTGXBadPayload  = errors.New("tgx bad payload")
 )
 
 type TGXClient struct {
@@ -628,6 +631,13 @@ func classifyTGXError(message string) error {
 		strings.Contains(normalized, "sign") ||
 		strings.Contains(normalized, "auth") {
 		return ErrTGXAuth
+	}
+	if strings.Contains(normalized, "停售") ||
+		strings.Contains(normalized, "暂时缺货") ||
+		strings.Contains(normalized, "缺货") ||
+		strings.Contains(normalized, "out of stock") ||
+		strings.Contains(normalized, "sold out") {
+		return ErrTGXUnavailable
 	}
 	return ErrTGXBusiness
 }

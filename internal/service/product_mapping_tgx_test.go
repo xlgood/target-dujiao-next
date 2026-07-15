@@ -209,6 +209,10 @@ func TestSyncTGXConnectionStockRetriesAndRecordsFailures(t *testing.T) {
 			w.WriteHeader(http.StatusServiceUnavailable)
 			return
 		}
+		if code == "TGX-UNAVAILABLE" {
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{"code": 0, "msg": "当前商品已停售"})
+			return
+		}
 		_ = json.NewEncoder(w).Encode(map[string]interface{}{"code": 200, "data": map[string]interface{}{"count": 9}})
 	}))
 	defer server.Close()
@@ -230,7 +234,7 @@ func TestSyncTGXConnectionStockRetriesAndRecordsFailures(t *testing.T) {
 	if err := db.Create(&mapping).Error; err != nil {
 		t.Fatal(err)
 	}
-	for _, code := range []string{"TGX-RETRY", "TGX-FAIL"} {
+	for _, code := range []string{"TGX-RETRY", "TGX-FAIL", "TGX-UNAVAILABLE"} {
 		sku := models.ProductSKU{ProductID: product.ID, SKUCode: code, IsActive: true}
 		if err := db.Create(&sku).Error; err != nil {
 			t.Fatal(err)
@@ -248,18 +252,22 @@ func TestSyncTGXConnectionStockRetriesAndRecordsFailures(t *testing.T) {
 	if err := svc.syncTGXConnectionStockWithConfig(conn, []models.ProductMapping{mapping}, cfg); err == nil {
 		t.Fatal("expected partial sync error")
 	}
-	if requests["TGX-RETRY"] != 2 || requests["TGX-FAIL"] != 2 {
+	if requests["TGX-RETRY"] != 2 || requests["TGX-FAIL"] != 2 || requests["TGX-UNAVAILABLE"] != 1 {
 		t.Fatalf("request counts=%v", requests)
 	}
 	var success models.SKUMapping
 	if err := db.Where("upstream_sku_code = ?", "TGX-RETRY").First(&success).Error; err != nil || success.UpstreamStock != 9 {
 		t.Fatalf("retry SKU=%+v err=%v", success, err)
 	}
+	var unavailable models.SKUMapping
+	if err := db.Where("upstream_sku_code = ?", "TGX-UNAVAILABLE").First(&unavailable).Error; err != nil || unavailable.UpstreamStock != 0 || unavailable.UpstreamIsActive || unavailable.StockSyncedAt == nil {
+		t.Fatalf("unavailable SKU=%+v err=%v", unavailable, err)
+	}
 	var run models.TGXInventorySyncRun
 	if err := db.Order("id DESC").First(&run).Error; err != nil {
 		t.Fatal(err)
 	}
-	if run.Status != "partial" || run.Total != 2 || run.Succeeded != 1 || run.Failed != 1 {
+	if run.Status != "partial" || run.Total != 3 || run.Succeeded != 2 || run.Failed != 1 {
 		t.Fatalf("run=%+v", run)
 	}
 }
