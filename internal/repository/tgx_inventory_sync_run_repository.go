@@ -1,6 +1,8 @@
 package repository
 
 import (
+	"time"
+
 	"github.com/dujiao-next/internal/models"
 	"gorm.io/gorm"
 )
@@ -8,6 +10,7 @@ import (
 type TGXInventorySyncRunRepository interface {
 	Create(run *models.TGXInventorySyncRun) error
 	Update(run *models.TGXInventorySyncRun) error
+	ListRunningBefore(cutoff time.Time) ([]models.TGXInventorySyncRun, error)
 	Latest(connectionID uint) (*models.TGXInventorySyncRun, error)
 	GetByID(id uint) (*models.TGXInventorySyncRun, error)
 	List(filter TGXInventorySyncRunListFilter) ([]models.TGXInventorySyncRun, int64, error)
@@ -42,6 +45,14 @@ func (r *GormTGXInventorySyncRunRepository) Create(run *models.TGXInventorySyncR
 
 func (r *GormTGXInventorySyncRunRepository) Update(run *models.TGXInventorySyncRun) error {
 	return r.db.Save(run).Error
+}
+
+func (r *GormTGXInventorySyncRunRepository) ListRunningBefore(cutoff time.Time) ([]models.TGXInventorySyncRun, error) {
+	var runs []models.TGXInventorySyncRun
+	if err := r.db.Where("status = ? AND started_at < ?", "running", cutoff).Order("started_at ASC").Find(&runs).Error; err != nil {
+		return nil, err
+	}
+	return runs, nil
 }
 
 func (r *GormTGXInventorySyncRunRepository) Latest(connectionID uint) (*models.TGXInventorySyncRun, error) {

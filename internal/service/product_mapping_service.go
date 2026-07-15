@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/dujiao-next/internal/constants"
+	"github.com/dujiao-next/internal/logger"
 	"github.com/dujiao-next/internal/models"
 	"github.com/dujiao-next/internal/repository"
 	"github.com/dujiao-next/internal/upstream"
@@ -99,19 +100,31 @@ func (s *ProductMappingService) LatestTGXInventorySyncRun(connectionID uint) (*m
 	if s == nil || s.tgxSyncRunRepo == nil {
 		return nil, nil
 	}
+	s.cleanupTimedOutTGXInventorySyncRuns()
 	run, err := s.tgxSyncRunRepo.Latest(connectionID)
-	if err != nil || run == nil || run.Status != "running" || run.StartedAt.IsZero() || time.Since(run.StartedAt) <= tgxInventorySyncTimeout {
-		return run, err
-	}
-	s.markTGXInventorySyncTimedOut(run)
-	return run, nil
+	return run, err
 }
 
 func (s *ProductMappingService) ListTGXInventorySyncRuns(filter repository.TGXInventorySyncRunListFilter) ([]models.TGXInventorySyncRun, int64, error) {
 	if s == nil || s.tgxSyncRunRepo == nil {
 		return []models.TGXInventorySyncRun{}, 0, nil
 	}
+	s.cleanupTimedOutTGXInventorySyncRuns()
 	return s.tgxSyncRunRepo.List(filter)
+}
+
+func (s *ProductMappingService) cleanupTimedOutTGXInventorySyncRuns() {
+	if s == nil || s.tgxSyncRunRepo == nil {
+		return
+	}
+	runs, err := s.tgxSyncRunRepo.ListRunningBefore(time.Now().Add(-tgxInventorySyncTimeout))
+	if err != nil {
+		logger.Warnw("tgx_inventory_sync_timeout_lookup_failed", "error", err)
+		return
+	}
+	for i := range runs {
+		s.markTGXInventorySyncTimedOut(&runs[i])
+	}
 }
 
 func (s *ProductMappingService) GetTGXInventorySyncRun(id uint) (*models.TGXInventorySyncRun, error) {
