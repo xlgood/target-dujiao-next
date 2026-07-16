@@ -142,9 +142,14 @@ func (a *paypalAdapter) QueryPayment(ctx context.Context, raw models.JSON, provi
 		}
 	}
 
+	status, ok := paypal.ToPaymentStatus("", result.Status)
+	if !ok {
+		return nil, fmt.Errorf("%w: unsupported PayPal capture status %q", ErrResponseInvalid, result.Status)
+	}
+
 	return &QueryResult{
 		ProviderRef: pickFirstNonEmpty(result.OrderID, providerRef),
-		Status:      result.Status,
+		Status:      status,
 		Amount:      amount,
 		Currency:    strings.ToUpper(strings.TrimSpace(result.Currency)),
 		PaidAt:      result.PaidAt,
