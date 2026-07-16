@@ -106,6 +106,11 @@ func setupAdminProviderCatalogSyncHandlerTest(t *testing.T) (*Handler, *gorm.DB,
 func TestSyncProviderCatalogImportsThroughAdminTrigger(t *testing.T) {
 	h, db, fansConnID, tgxConnID := setupAdminProviderCatalogSyncHandlerTest(t)
 	factoryCalls := 0
+	enqueueCalls := 0
+	h.ProviderCatalogInventoryEnqueue = func() error {
+		enqueueCalls++
+		return nil
+	}
 	h.ProviderCatalogClientFactory = func(fansConn, tgxConn *models.SiteConnection, decryptSecret func(string) (string, error)) (service.FansGurusCatalogClient, service.TGXCatalogClient, error) {
 		factoryCalls++
 		if fansConn.ID != fansConnID || tgxConn.ID != tgxConnID {
@@ -143,6 +148,9 @@ func TestSyncProviderCatalogImportsThroughAdminTrigger(t *testing.T) {
 	if factoryCalls != 1 {
 		t.Fatalf("factoryCalls=%d, want 1", factoryCalls)
 	}
+	if enqueueCalls != 1 {
+		t.Fatalf("enqueueCalls=%d, want 1", enqueueCalls)
+	}
 
 	var resp struct {
 		StatusCode int                               `json:"status_code"`
@@ -151,7 +159,7 @@ func TestSyncProviderCatalogImportsThroughAdminTrigger(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if resp.StatusCode != 0 || resp.Data.Imported != 3 || resp.Data.FilteredPlatform != 0 {
+	if resp.StatusCode != 0 || resp.Data.Imported != 3 || resp.Data.FilteredPlatform != 0 || !resp.Data.InventoryRefreshQueued || resp.Data.InventoryRefreshStatus != "queued" {
 		t.Fatalf("unexpected response: %+v", resp)
 	}
 
@@ -161,6 +169,61 @@ func TestSyncProviderCatalogImportsThroughAdminTrigger(t *testing.T) {
 	}
 	if len(mappings) != 3 {
 		t.Fatalf("mapping count=%d, want 3", len(mappings))
+	}
+}
+
+func TestSyncProviderCatalogKeepsImportedResultWhenInventoryQueueDisabled(t *testing.T) {
+	h, _, fansConnID, tgxConnID := setupAdminProviderCatalogSyncHandlerTest(t)
+	h.ProviderCatalogClientFactory = func(_, _ *models.SiteConnection, _ func(string) (string, error)) (service.FansGurusCatalogClient, service.TGXCatalogClient, error) {
+		return adminProviderCatalogFakeFansClient{}, adminProviderCatalogFakeTGXClient{}, nil
+	}
+
+	body := fmt.Sprintf(`{"fansgurus_connection_id":%d,"tgx_connection_id":%d}`, fansConnID, tgxConnID)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/provider-catalog/sync", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = req
+
+	h.SyncProviderCatalog(c)
+
+	var resp struct {
+		StatusCode int                               `json:"status_code"`
+		Data       service.ProviderCatalogSyncResult `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.StatusCode != 0 || resp.Data.InventoryRefreshQueued || resp.Data.InventoryRefreshStatus != "queue_disabled" {
+		t.Fatalf("unexpected response: %+v", resp)
+	}
+}
+
+func TestSyncProviderCatalogKeepsImportedResultWhenInventoryEnqueueFails(t *testing.T) {
+	h, _, fansConnID, tgxConnID := setupAdminProviderCatalogSyncHandlerTest(t)
+	h.ProviderCatalogClientFactory = func(_, _ *models.SiteConnection, _ func(string) (string, error)) (service.FansGurusCatalogClient, service.TGXCatalogClient, error) {
+		return adminProviderCatalogFakeFansClient{}, adminProviderCatalogFakeTGXClient{}, nil
+	}
+	h.ProviderCatalogInventoryEnqueue = func() error { return fmt.Errorf("queue unavailable") }
+
+	body := fmt.Sprintf(`{"fansgurus_connection_id":%d,"tgx_connection_id":%d}`, fansConnID, tgxConnID)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/provider-catalog/sync", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = req
+
+	h.SyncProviderCatalog(c)
+
+	var resp struct {
+		StatusCode int                               `json:"status_code"`
+		Data       service.ProviderCatalogSyncResult `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.StatusCode != 0 || resp.Data.InventoryRefreshQueued || resp.Data.InventoryRefreshStatus != "enqueue_failed" {
+		t.Fatalf("unexpected response: %+v", resp)
 	}
 }
 

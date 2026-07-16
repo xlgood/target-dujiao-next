@@ -6,7 +6,8 @@ import "github.com/dujiao-next/internal/provider"
 // 说明：该处理器仅用于管理端 API。
 type Handler struct {
 	*provider.Container
-	ProviderCatalogClientFactory ProviderCatalogClientFactory
+	ProviderCatalogClientFactory    ProviderCatalogClientFactory
+	ProviderCatalogInventoryEnqueue func() error
 }
 
 // New 创建后台处理器

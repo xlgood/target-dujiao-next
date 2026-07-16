@@ -6,6 +6,7 @@ import (
 	"github.com/dujiao-next/internal/constants"
 	"github.com/dujiao-next/internal/http/handlers/shared"
 	"github.com/dujiao-next/internal/http/response"
+	"github.com/dujiao-next/internal/logger"
 	"github.com/dujiao-next/internal/models"
 	"github.com/dujiao-next/internal/service"
 	"github.com/dujiao-next/internal/upstream"
@@ -73,13 +74,23 @@ func (h *Handler) SyncProviderCatalog(c *gin.Context) {
 		shared.RespondError(c, response.CodeInternal, "error.bad_request", err)
 		return
 	}
-	if h.QueueClient == nil || !h.QueueClient.Enabled() {
-		shared.RespondError(c, response.CodeInternal, "error.tgx_inventory_refresh_failed", nil)
-		return
-	}
-	if err := h.QueueClient.EnqueueUpstreamSyncStock(); err != nil {
-		shared.RespondError(c, response.CodeInternal, "error.tgx_inventory_refresh_failed", err)
-		return
+	result.InventoryRefreshStatus = "queue_disabled"
+	if h.ProviderCatalogInventoryEnqueue != nil {
+		if err := h.ProviderCatalogInventoryEnqueue(); err != nil {
+			result.InventoryRefreshStatus = "enqueue_failed"
+			logger.Warnw("provider_catalog_inventory_enqueue_failed", "error", err)
+		} else {
+			result.InventoryRefreshQueued = true
+			result.InventoryRefreshStatus = "queued"
+		}
+	} else if h.QueueClient != nil && h.QueueClient.Enabled() {
+		if err := h.QueueClient.EnqueueUpstreamSyncStock(); err != nil {
+			result.InventoryRefreshStatus = "enqueue_failed"
+			logger.Warnw("provider_catalog_inventory_enqueue_failed", "error", err)
+		} else {
+			result.InventoryRefreshQueued = true
+			result.InventoryRefreshStatus = "queued"
+		}
 	}
 
 	response.Success(c, result)

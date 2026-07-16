@@ -25,17 +25,19 @@ type ProviderCatalogSyncInput struct {
 }
 
 type ProviderCatalogSyncResult struct {
-	FansGurusPulled    int                           `json:"fans_gurus_pulled"`
-	TGXPulled          int                           `json:"tgx_pulled"`
-	SupportedPlatforms []string                      `json:"supported_platforms"`
-	FilteredTelegram   int                           `json:"filtered_telegram"`
-	FilteredInactive   int                           `json:"filtered_inactive"`
-	FilteredPlatform   int                           `json:"filtered_platform"`
-	Imported           int                           `json:"imported"`
-	Updated            int                           `json:"updated"`
-	Skipped            int                           `json:"skipped"`
-	Deactivated        int                           `json:"deactivated"`
-	FilterReasons      []ProviderCatalogFilterReason `json:"filter_reasons"`
+	FansGurusPulled        int                           `json:"fans_gurus_pulled"`
+	TGXPulled              int                           `json:"tgx_pulled"`
+	SupportedPlatforms     []string                      `json:"supported_platforms"`
+	FilteredTelegram       int                           `json:"filtered_telegram"`
+	FilteredInactive       int                           `json:"filtered_inactive"`
+	FilteredPlatform       int                           `json:"filtered_platform"`
+	Imported               int                           `json:"imported"`
+	Updated                int                           `json:"updated"`
+	Skipped                int                           `json:"skipped"`
+	Deactivated            int                           `json:"deactivated"`
+	FilterReasons          []ProviderCatalogFilterReason `json:"filter_reasons"`
+	InventoryRefreshQueued bool                          `json:"inventory_refresh_queued"`
+	InventoryRefreshStatus string                        `json:"inventory_refresh_status"`
 }
 
 type ProviderCatalogFilterReason struct {
