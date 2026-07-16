@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -172,5 +173,41 @@ func TestPaypalAdapter_QueryPayment_MapsCompletedCaptureToSuccess(t *testing.T) 
 	}
 	if result.Status != constants.PaymentStatusSuccess {
 		t.Fatalf("Status = %q, want %q", result.Status, constants.PaymentStatusSuccess)
+	}
+}
+
+func TestPaypalAdapter_CreatePayment_AppendsOrderQueryToCancelURL(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/oauth2/token" {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"access_token":"paypal-test-token","token_type":"Bearer","expires_in":3600}`))
+			return
+		}
+		if r.URL.Path != "/v2/checkout/orders" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		var payload map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode payload: %v", err)
+		}
+		context, _ := payload["application_context"].(map[string]any)
+		cancelURL, _ := context["cancel_url"].(string)
+		if got := cancelURL; got != "https://shop.example.com/pay?biz_type=order&order_no=ORDER-1&paypal_cancel=1" {
+			t.Fatalf("cancel_url = %q", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"PP-ORDER-1","status":"CREATED","links":[{"rel":"approve","href":"https://paypal.example/approve"}]}`))
+	}))
+	defer server.Close()
+
+	_, err := NewPaypalAdapter().CreatePayment(context.Background(), models.JSON{
+		"client_id": "client-test", "client_secret": "secret-test", "base_url": server.URL,
+		"return_url": "https://shop.example.com/pay", "cancel_url": "https://shop.example.com/pay",
+	}, CreateInput{
+		OrderNo: "ORDER-1", Amount: models.NewMoneyFromDecimal(decimal.NewFromInt(1)), Currency: "USD",
+		ReturnURLQuery: map[string]string{"biz_type": "order", "order_no": "ORDER-1", "paypal_return": "1"},
+	})
+	if err != nil {
+		t.Fatalf("CreatePayment() failed: %v", err)
 	}
 }

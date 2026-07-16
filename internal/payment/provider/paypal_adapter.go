@@ -89,6 +89,11 @@ func (a *paypalAdapter) CreatePayment(ctx context.Context, raw models.JSON, inpu
 	returnURL = appendQueryParams(returnURL, input.ReturnURLQuery)
 
 	cancelURL, _ := input.Extra["cancel_url"].(string)
+	if strings.TrimSpace(cancelURL) == "" {
+		cancelURL = strings.TrimSpace(cfg.CancelURL)
+	}
+	// A canceled checkout must still return the customer to the local order.
+	cancelURL = appendQueryParams(cancelURL, paypalCancelURLQuery(input.ReturnURLQuery))
 	native := paypal.CreateInput{
 		OrderNo:     input.OrderNo,
 		Amount:      payAmount,
@@ -119,6 +124,21 @@ func (a *paypalAdapter) CreatePayment(ctx context.Context, raw models.JSON, inpu
 		AmountSent:   payAmount,
 		CurrencySent: payCurrency,
 	}, nil
+}
+
+func paypalCancelURLQuery(returnQuery map[string]string) map[string]string {
+	if len(returnQuery) == 0 {
+		return nil
+	}
+	query := make(map[string]string, len(returnQuery))
+	for key, value := range returnQuery {
+		if key == "paypal_return" || key == "pp_return" {
+			continue
+		}
+		query[key] = value
+	}
+	query["paypal_cancel"] = "1"
+	return query
 }
 
 // QueryPayment 调用 paypal.CaptureOrder 完成捕获并返回状态（实现 Capturer）。
