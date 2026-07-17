@@ -1,6 +1,7 @@
 package service
 
 import (
+	"net/mail"
 	"regexp"
 	"strings"
 
@@ -167,6 +168,7 @@ func normalizeSiteFooterLinks(raw interface{}) []interface{} {
 
 func normalizeSiteContact(raw interface{}) map[string]interface{} {
 	result := map[string]interface{}{
+		"email":    "",
 		"telegram": "",
 		"whatsapp": "",
 	}
@@ -174,9 +176,22 @@ func normalizeSiteContact(raw interface{}) map[string]interface{} {
 	if !ok {
 		return result
 	}
+	result["email"] = normalizeSiteContactEmail(contactMap["email"])
 	result["telegram"] = normalizeSettingText(contactMap["telegram"])
 	result["whatsapp"] = normalizeSettingText(contactMap["whatsapp"])
 	return result
+}
+
+func normalizeSiteContactEmail(raw interface{}) string {
+	email := strings.ToLower(normalizeSettingText(raw))
+	if email == "" {
+		return ""
+	}
+	parsed, err := mail.ParseAddress(email)
+	if err != nil || parsed.Address != email {
+		return ""
+	}
+	return email
 }
 
 func normalizeSiteBrand(raw interface{}) map[string]interface{} {

@@ -110,6 +110,7 @@ func TestUpdateSiteSettingNormalized(t *testing.T) {
 			"site_icon": "  /uploads/site/icon.png  ",
 		},
 		"contact": map[string]interface{}{
+			"email":    "  SUPPORT@EXAMPLE.COM  ",
 			"telegram": "  https://t.me/demo  ",
 			"whatsapp": 123,
 		},
@@ -211,6 +212,9 @@ func TestUpdateSiteSettingNormalized(t *testing.T) {
 	contact, ok := result["contact"].(map[string]interface{})
 	if !ok {
 		t.Fatalf("invalid contact payload type: %T", result["contact"])
+	}
+	if contact["email"] != "support@example.com" {
+		t.Fatalf("unexpected email: %v", contact["email"])
 	}
 	if contact["telegram"] != "https://t.me/demo" {
 		t.Fatalf("unexpected telegram: %v", contact["telegram"])
@@ -347,6 +351,28 @@ func TestUpdateSiteSettingNormalized(t *testing.T) {
 	}
 	if thirdScript["position"] != "head" || thirdScript["enabled"] != false {
 		t.Fatalf("unexpected scripts[2]: %+v", thirdScript)
+	}
+}
+
+func TestUpdateSiteSettingDropsInvalidContactEmail(t *testing.T) {
+	repo := newMockSettingRepo()
+	svc := NewSettingService(repo)
+
+	result, err := svc.Update(constants.SettingKeySiteConfig, map[string]interface{}{
+		"contact": map[string]interface{}{
+			"email": "not-an-email",
+		},
+	})
+	if err != nil {
+		t.Fatalf("update site config failed: %v", err)
+	}
+
+	contact, ok := result["contact"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("invalid contact payload type: %T", result["contact"])
+	}
+	if contact["email"] != "" {
+		t.Fatalf("invalid email should be dropped: %v", contact["email"])
 	}
 }
 
