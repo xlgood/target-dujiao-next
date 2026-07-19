@@ -136,7 +136,7 @@ func TestImportProviderCatalogCreatesProductsAndMappings(t *testing.T) {
 	}
 }
 
-func TestImportProviderCatalogUsesSharedPlatformImage(t *testing.T) {
+func TestImportProviderCatalogKeepsTGXCover(t *testing.T) {
 	db := setupProviderCatalogImportDB(t)
 	svc := NewProductMappingService(
 		repository.NewProductMappingRepository(db),
@@ -165,8 +165,8 @@ func TestImportProviderCatalogUsesSharedPlatformImage(t *testing.T) {
 	if err := db.Where("slug LIKE ?", "catalog-facebook-%").First(&product).Error; err != nil {
 		t.Fatalf("load product: %v", err)
 	}
-	if len(product.Images) != 1 || product.Images[0] != "/uploads/catalog/facebook.svg" {
-		t.Fatalf("images=%v, want shared Facebook image", product.Images)
+	if len(product.Images) != 1 || product.Images[0] != "https://upstream.example/cover.jpg" {
+		t.Fatalf("images=%v, want TGX cover", product.Images)
 	}
 }
 

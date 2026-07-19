@@ -2,8 +2,8 @@ package models
 
 import "strings"
 
-// ProviderCatalogImagePath returns the local shared image for a supported
-// catalog platform. Provider product covers are intentionally not retained.
+// ProviderCatalogImagePath returns the local fallback image for a supported
+// catalog platform when an upstream product does not provide a usable cover.
 func ProviderCatalogImagePath(platform string) string {
 	switch strings.ToLower(strings.TrimSpace(platform)) {
 	case "facebook":

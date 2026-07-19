@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/dujiao-next/internal/constants"
+	"github.com/dujiao-next/internal/htmltext"
 	"github.com/dujiao-next/internal/models"
 	"github.com/dujiao-next/internal/repository"
 	"github.com/dujiao-next/internal/upstream"
@@ -76,9 +77,7 @@ func (s *ProductMappingService) importProviderCatalogItem(connectionID uint, ite
 	if err != nil {
 		return false, false, err
 	}
-	// Catalog images are shared by platform. Do not download thousands of
-	// upstream covers; operations can replace each local platform asset once.
-	item.Images = []string{models.ProviderCatalogImagePath(platform)}
+	item.Images = providerCatalogImages(item, platform)
 	price, cost, err := providerCatalogAmounts(item.Provider, item.UpstreamPrice, item.TargetPrice, conn)
 	if err != nil {
 		return false, false, fmt.Errorf("calculate catalog price for %s:%s: %w", item.Provider, item.Code, err)
@@ -124,8 +123,8 @@ func (s *ProductMappingService) importProviderCatalogItemInTx(tx *gorm.DB, conne
 		CategoryID:           category.ID,
 		Slug:                 slug,
 		TitleJSON:            localizedText(item.Name),
-		DescriptionJSON:      localizedText(item.Description),
-		ContentJSON:          localizedText(item.Description),
+		DescriptionJSON:      providerCatalogDescription(item),
+		ContentJSON:          providerCatalogContent(item),
 		SeoMetaJSON:          models.JSON{},
 		ManualFormSchemaJSON: providerCatalogManualFormSchema(item),
 		PriceAmount:          models.NewMoneyFromDecimal(price),
@@ -218,8 +217,8 @@ func (s *ProductMappingService) refreshProviderCatalogItemInTx(tx *gorm.DB, mapp
 	}
 	product.Slug = slug
 	product.TitleJSON = localizedText(item.Name)
-	product.DescriptionJSON = localizedText(item.Description)
-	product.ContentJSON = localizedText(item.Description)
+	product.DescriptionJSON = providerCatalogDescription(item)
+	product.ContentJSON = providerCatalogContent(item)
 	if conn == nil || conn.AutoSyncPrice {
 		product.PriceAmount = models.NewMoneyFromDecimal(price)
 	}
@@ -228,7 +227,7 @@ func (s *ProductMappingService) refreshProviderCatalogItemInTx(tx *gorm.DB, mapp
 	product.MinPurchaseQuantity = item.MinQuantity
 	product.MaxPurchaseQuantity = item.MaxQuantity
 	product.ManualFormSchemaJSON = providerCatalogManualFormSchema(item)
-	product.Images = models.StringArray{models.ProviderCatalogImagePath(platform)}
+	product.Images = models.StringArray(providerCatalogImages(item, platform))
 	product.SortOrder = item.SortOrder
 	product.Tags = models.StringArray{}
 	product.IsMapped = true
@@ -341,6 +340,92 @@ func providerCatalogStockSyncedAt(provider string, stock int, now time.Time) *ti
 		return nil
 	}
 	return &now
+}
+
+func providerCatalogImages(item upstream.ProviderCatalogItem, platform string) []string {
+	if item.Provider == upstream.CatalogProviderTGX {
+		images := make([]string, 0, len(item.Images))
+		for _, image := range item.Images {
+			image = strings.TrimSpace(image)
+			if strings.HasPrefix(image, "https://") || strings.HasPrefix(image, "http://") {
+				images = append(images, image)
+			}
+		}
+		if len(images) > 0 {
+			return images
+		}
+	}
+	return []string{models.ProviderCatalogImagePath(platform)}
+}
+
+func providerCatalogDescription(item upstream.ProviderCatalogItem) models.JSON {
+	if item.Provider == upstream.CatalogProviderTGX {
+		return localizedText(htmltext.StripToPlainText(item.Description))
+	}
+	if item.Provider == upstream.CatalogProviderFansGurus {
+		return providerCatalogServiceDescription()
+	}
+	return localizedText(item.Description)
+}
+
+func providerCatalogContent(item upstream.ProviderCatalogItem) models.JSON {
+	if item.Provider == upstream.CatalogProviderTGX {
+		return localizedText(strings.TrimSpace(item.Description))
+	}
+	if item.Provider == upstream.CatalogProviderFansGurus {
+		return providerCatalogServiceContent(item)
+	}
+	return localizedText(item.Description)
+}
+
+func providerCatalogServiceDescription() models.JSON {
+	return models.JSON{
+		"zh-CN": "该服务由上游供应商处理。请在结算时准确填写服务所需资料。",
+		"zh-TW": "此服務由上游供應商處理。請在結算時準確填寫服務所需資料。",
+		"en-US": "This service is processed by an upstream provider. Please enter the required information accurately at checkout.",
+	}
+}
+
+func providerCatalogServiceContent(item upstream.ProviderCatalogItem) models.JSON {
+	return models.JSON{
+		"zh-CN": "<h3>下单说明</h3><p>本服务由上游供应商处理。付款后请在订单页查看处理进度和结果。</p><h3>填写要求</h3><p>结算时请按要求填写服务所需资料，并确认链接或账号信息准确无误。</p>" + providerCatalogQuantityLine(item, "zh-CN"),
+		"zh-TW": "<h3>下單說明</h3><p>本服務由上游供應商處理。付款後請在訂單頁查看處理進度和結果。</p><h3>填寫要求</h3><p>結算時請按要求填寫服務所需資料，並確認連結或帳號資訊準確無誤。</p>" + providerCatalogQuantityLine(item, "zh-TW"),
+		"en-US": "<h3>Order information</h3><p>This service is processed by an upstream provider. Check the order page for processing progress and results after payment.</p><h3>Required information</h3><p>Enter the required service information at checkout and verify that any link or account information is accurate.</p>" + providerCatalogQuantityLine(item, "en-US"),
+	}
+}
+
+func providerCatalogQuantityLine(item upstream.ProviderCatalogItem, locale string) string {
+	minimum := item.MinQuantity
+	maximum := item.MaxQuantity
+	if minimum <= 0 && maximum <= 0 {
+		return ""
+	}
+	switch locale {
+	case "zh-CN":
+		if minimum > 0 && maximum > 0 {
+			return fmt.Sprintf("<p>可购买数量：%d 至 %d。</p>", minimum, maximum)
+		}
+		if minimum > 0 {
+			return fmt.Sprintf("<p>最小购买数量：%d。</p>", minimum)
+		}
+		return fmt.Sprintf("<p>最大购买数量：%d。</p>", maximum)
+	case "zh-TW":
+		if minimum > 0 && maximum > 0 {
+			return fmt.Sprintf("<p>可購買數量：%d 至 %d。</p>", minimum, maximum)
+		}
+		if minimum > 0 {
+			return fmt.Sprintf("<p>最小購買數量：%d。</p>", minimum)
+		}
+		return fmt.Sprintf("<p>最大購買數量：%d。</p>", maximum)
+	default:
+		if minimum > 0 && maximum > 0 {
+			return fmt.Sprintf("<p>Purchase quantity: %d to %d.</p>", minimum, maximum)
+		}
+		if minimum > 0 {
+			return fmt.Sprintf("<p>Minimum purchase quantity: %d.</p>", minimum)
+		}
+		return fmt.Sprintf("<p>Maximum purchase quantity: %d.</p>", maximum)
+	}
 }
 
 func (s *ProductMappingService) providerCatalogConnection(connectionID uint, provider string) (*models.SiteConnection, error) {

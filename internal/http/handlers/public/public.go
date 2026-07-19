@@ -34,6 +34,7 @@ type publicSKUView struct {
 // publicProductView 内部商品计算结构，装饰完成后转换为 dto.ProductResp
 type publicProductView struct {
 	models.Product
+	UpstreamFulfillment  bool
 	PromotionID          *uint
 	PromotionName        string
 	PromotionType        string
@@ -76,6 +77,7 @@ func (v *publicProductView) toProductResp() dto.ProductResp {
 			ManualStockSold:      maskPublicStockSold(mode, sv.ManualStockSold),
 			AutoStockAvailable:   maskPublicStockInt64(mode, sv.AutoStockAvailable),
 			UpstreamStock:        maskPublicStockInt(mode, sv.UpstreamStock),
+			UpstreamStockUnknown: sv.UpstreamStockUnknown,
 			StockStatus:          skuStatus,
 			StockDisplayMode:     skuDisplay.mode,
 			StockDisplay:         skuDisplay.display,
@@ -116,9 +118,11 @@ func (v *publicProductView) toProductResp() dto.ProductResp {
 		StockRangeMax:        productDisplay.rangeMax,
 		StockQuantityHidden:  productDisplay.quantityHidden,
 		FulfillmentType:      v.Product.FulfillmentType,
+		UpstreamFulfillment:  v.UpstreamFulfillment,
 		ManualFormSchema:     v.Product.ManualFormSchemaJSON,
 		ManualStockAvailable: maskPublicStockInt(mode, v.ManualStockAvailable),
 		AutoStockAvailable:   maskPublicStockInt64(mode, v.AutoStockAvailable),
+		UpstreamStockUnknown: v.UpstreamStockUnknown,
 		StockStatus:          v.StockStatus,
 		IsSoldOut:            v.IsSoldOut,
 		PaymentChannelIDs:    service.DecodeChannelIDs(v.Product.PaymentChannelIDs),
@@ -190,6 +194,13 @@ func buildPublicStockDisplay(mode, status string, quantity int64) publicStockDis
 		display:        normalizedStatus,
 		quantityHidden: normalizedMode != constants.ProductStockDisplayExact,
 	}
+	if normalizedStatus == constants.ProductStockStatusPending {
+		// A provider has not confirmed this inventory yet. Do not expose a
+		// synthetic zero quantity as if it were an actual sold-out result.
+		view.display = constants.ProductStockStatusPending
+		view.quantityHidden = true
+		return view
+	}
 
 	switch normalizedMode {
 	case constants.ProductStockDisplayRange:
@@ -209,6 +220,8 @@ func buildPublicStockDisplay(mode, status string, quantity int64) publicStockDis
 
 func normalizePublicStockStatus(status string, quantity int64) string {
 	switch status {
+	case constants.ProductStockStatusPending:
+		return constants.ProductStockStatusPending
 	case constants.ProductStockStatusUnlimited:
 		return constants.ProductStockStatusUnlimited
 	case constants.ProductStockStatusOutOfStock:
@@ -297,6 +310,9 @@ func (v *publicProductView) productStockQuantity() int64 {
 }
 
 func (v *publicProductView) skuStockState(sv publicSKUView) (string, int64) {
+	if sv.UpstreamStockUnknown {
+		return constants.ProductStockStatusPending, 0
+	}
 	fulfillmentType := strings.TrimSpace(v.Product.FulfillmentType)
 	if fulfillmentType == "" {
 		fulfillmentType = constants.FulfillmentTypeManual
@@ -936,6 +952,7 @@ func (h *Handler) decorateUpstreamStock(product *models.Product, item *publicPro
 	}
 
 	// 根据上游原始交付类型设置展示类型：auto 还是 manual
+	item.UpstreamFulfillment = true
 	displayType := mapping.UpstreamFulfillmentType
 	if displayType != constants.FulfillmentTypeAuto {
 		displayType = constants.FulfillmentTypeManual
@@ -968,6 +985,11 @@ func (h *Handler) decorateUpstreamStock(product *models.Product, item *publicPro
 			sku.UpstreamStock = 0
 			continue
 		}
+		if mapping.Provider == "tgx" && sm.UpstreamStock == -1 && sm.StockSyncedAt == nil {
+			sku.UpstreamStock = 0
+			sku.UpstreamStockUnknown = true
+			continue
+		}
 		hasActiveMapping = true
 		sku.UpstreamStock = sm.UpstreamStock
 
@@ -994,6 +1016,12 @@ func (h *Handler) decorateUpstreamStock(product *models.Product, item *publicPro
 	}
 
 	if !hasActiveMapping {
+		if hasPendingUpstreamStock(item.Product.SKUs) {
+			item.UpstreamStockUnknown = true
+			item.StockStatus = constants.ProductStockStatusPending
+			item.IsSoldOut = false
+			return
+		}
 		item.StockStatus = constants.ProductStockStatusOutOfStock
 		item.IsSoldOut = true
 		return
@@ -1025,6 +1053,15 @@ func (h *Handler) decorateUpstreamStock(product *models.Product, item *publicPro
 	default:
 		item.StockStatus = constants.ProductStockStatusInStock
 	}
+}
+
+func hasPendingUpstreamStock(skus []models.ProductSKU) bool {
+	for i := range skus {
+		if skus[i].UpstreamStockUnknown {
+			return true
+		}
+	}
+	return false
 }
 
 // GetPosts 获取文章/公告列表

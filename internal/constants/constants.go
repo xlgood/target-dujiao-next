@@ -202,6 +202,9 @@ const (
 	ProductStockStatusInStock    = "in_stock"
 	ProductStockStatusLowStock   = "low_stock"
 	ProductStockStatusOutOfStock = "out_of_stock"
+	// ProductStockStatusPending is used before a provider has returned usable stock.
+	// It is intentionally not interchangeable with unlimited inventory.
+	ProductStockStatusPending = "pending_stock"
 )
 
 // 公开库存展示模式与档位常量

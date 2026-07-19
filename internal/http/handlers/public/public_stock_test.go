@@ -1,10 +1,17 @@
 package public
 
 import (
+	"fmt"
 	"testing"
+	"time"
 
 	"github.com/dujiao-next/internal/constants"
 	"github.com/dujiao-next/internal/models"
+	"github.com/dujiao-next/internal/provider"
+	"github.com/dujiao-next/internal/repository"
+
+	"github.com/glebarez/sqlite"
+	"gorm.io/gorm"
 )
 
 func TestDecorateProductStock_AutoSkipsInactiveSKUs(t *testing.T) {
@@ -51,6 +58,62 @@ func TestDecorateProductStock_AutoSkipsInactiveSKUs(t *testing.T) {
 	}
 	if item.IsSoldOut {
 		t.Fatalf("expected product not sold out when active sku has stock")
+	}
+}
+
+func TestDecoratePublicProductTGXPendingStockIsNotUnlimited(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(fmt.Sprintf("file:public_tgx_stock_%d?mode=memory&cache=shared", time.Now().UnixNano())), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open database: %v", err)
+	}
+	if err := db.AutoMigrate(&models.Product{}, &models.ProductSKU{}, &models.ProductMapping{}, &models.SKUMapping{}); err != nil {
+		t.Fatalf("migrate database: %v", err)
+	}
+
+	product := &models.Product{
+		Slug:            "tgx-pending-stock",
+		TitleJSON:       models.JSON{"zh-CN": "TGX pending"},
+		FulfillmentType: constants.FulfillmentTypeUpstream,
+		IsActive:        true,
+	}
+	if err := db.Create(product).Error; err != nil {
+		t.Fatalf("create product: %v", err)
+	}
+	sku := &models.ProductSKU{ProductID: product.ID, SKUCode: models.DefaultSKUCode, IsActive: true}
+	if err := db.Create(sku).Error; err != nil {
+		t.Fatalf("create SKU: %v", err)
+	}
+	mapping := &models.ProductMapping{LocalProductID: product.ID, ConnectionID: 1, Provider: "tgx", UpstreamFulfillmentType: constants.FulfillmentTypeManual, IsActive: true}
+	if err := db.Create(mapping).Error; err != nil {
+		t.Fatalf("create mapping: %v", err)
+	}
+	if err := db.Create(&models.SKUMapping{ProductMappingID: mapping.ID, LocalSKUID: sku.ID, UpstreamStock: -1, UpstreamIsActive: true}).Error; err != nil {
+		t.Fatalf("create SKU mapping: %v", err)
+	}
+	product.SKUs = []models.ProductSKU{*sku}
+
+	h := &Handler{Container: &provider.Container{
+		ProductMappingRepo: repository.NewProductMappingRepository(db),
+		SKUMappingRepo:     repository.NewSKUMappingRepository(db),
+	}}
+	resp, err := h.decoratePublicProduct(product, nil)
+	if err != nil {
+		t.Fatalf("decorate product: %v", err)
+	}
+	if resp.StockStatus != constants.ProductStockStatusPending || !resp.UpstreamStockUnknown {
+		t.Fatalf("unexpected product stock state: status=%q unknown=%t", resp.StockStatus, resp.UpstreamStockUnknown)
+	}
+	if resp.StockDisplay != constants.ProductStockStatusPending {
+		t.Fatalf("expected pending display, got %q", resp.StockDisplay)
+	}
+	if !resp.UpstreamFulfillment || resp.FulfillmentType != constants.FulfillmentTypeManual {
+		t.Fatalf("expected upstream fulfillment display, got upstream=%t type=%q", resp.UpstreamFulfillment, resp.FulfillmentType)
+	}
+	if len(resp.SKUs) != 1 {
+		t.Fatalf("expected one SKU, got %d", len(resp.SKUs))
+	}
+	if resp.SKUs[0].StockStatus != constants.ProductStockStatusPending || !resp.SKUs[0].UpstreamStockUnknown || resp.SKUs[0].UpstreamStock != 0 {
+		t.Fatalf("unexpected SKU stock state: %+v", resp.SKUs[0])
 	}
 }
 

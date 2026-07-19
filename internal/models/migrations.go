@@ -6,6 +6,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/dujiao-next/internal/htmltext"
+
 	"gorm.io/gorm"
 )
 
@@ -97,6 +99,95 @@ func ensureTGXUnknownStockMigration() error {
 			ValueJSON: JSON{"done": true, "migrated_at": time.Now().UTC().Format(time.RFC3339)},
 		}).Error
 	})
+}
+
+// ensureProviderCatalogContentMigration repairs the published catalog rows
+// created before descriptions and rich details were separated. It never
+// changes product visibility and leaves operator-authored content untouched.
+func ensureProviderCatalogContentMigration() error {
+	if DB == nil {
+		return errors.New("database is not initialized")
+	}
+	var marker Setting
+	if err := DB.First(&marker, "key = ?", providerCatalogContentMigrationSettingKey).Error; err == nil && migrationDone(marker.ValueJSON) {
+		return nil
+	} else if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		return err
+	}
+
+	return DB.Transaction(func(tx *gorm.DB) error {
+		var mappings []ProductMapping
+		if err := tx.Where("provider IN ? AND deleted_at IS NULL", []string{"tgx", "fansgurus"}).Find(&mappings).Error; err != nil {
+			return err
+		}
+		for _, mapping := range mappings {
+			var product Product
+			if err := tx.Where("id = ? AND deleted_at IS NULL", mapping.LocalProductID).First(&product).Error; err != nil {
+				if errors.Is(err, gorm.ErrRecordNotFound) {
+					continue
+				}
+				return err
+			}
+
+			switch mapping.Provider {
+			case "tgx":
+				if normalizeLocalizedContent(product.ContentJSON) == "" {
+					product.ContentJSON = product.DescriptionJSON
+				}
+				product.DescriptionJSON = stripLocalizedHTML(product.ContentJSON)
+			case "fansgurus":
+				if normalizeLocalizedContent(product.DescriptionJSON) == "" {
+					product.DescriptionJSON = providerCatalogBaselineDescription()
+				}
+				if normalizeLocalizedContent(product.ContentJSON) == "" {
+					product.ContentJSON = providerCatalogBaselineContent()
+				}
+			}
+			if err := tx.Model(&Product{}).Where("id = ?", product.ID).Updates(map[string]interface{}{
+				"description_json": product.DescriptionJSON,
+				"content_json":     product.ContentJSON,
+			}).Error; err != nil {
+				return err
+			}
+		}
+		return tx.Save(&Setting{
+			Key:       providerCatalogContentMigrationSettingKey,
+			ValueJSON: JSON{"done": true, "migrated_at": time.Now().UTC().Format(time.RFC3339)},
+		}).Error
+	})
+}
+
+func normalizeLocalizedContent(content JSON) string {
+	for _, value := range content {
+		if strings.TrimSpace(fmt.Sprint(value)) != "" {
+			return strings.TrimSpace(fmt.Sprint(value))
+		}
+	}
+	return ""
+}
+
+func stripLocalizedHTML(content JSON) JSON {
+	result := JSON{}
+	for locale, value := range content {
+		result[locale] = htmltext.StripToPlainText(fmt.Sprint(value))
+	}
+	return result
+}
+
+func providerCatalogBaselineDescription() JSON {
+	return JSON{
+		"zh-CN": "该服务由上游供应商处理。请在结算时准确填写服务所需资料。",
+		"zh-TW": "此服務由上游供應商處理。請在結算時準確填寫服務所需資料。",
+		"en-US": "This service is processed by an upstream provider. Please enter the required information accurately at checkout.",
+	}
+}
+
+func providerCatalogBaselineContent() JSON {
+	return JSON{
+		"zh-CN": "<h3>下单说明</h3><p>本服务由上游供应商处理。付款后请在订单页查看处理进度和结果。</p><h3>填写要求</h3><p>结算时请按要求填写服务所需资料，并确认链接或账号信息准确无误。</p>",
+		"zh-TW": "<h3>下單說明</h3><p>本服務由上游供應商處理。付款後請在訂單頁查看處理進度和結果。</p><h3>填寫要求</h3><p>結算時請按要求填寫服務所需資料，並確認連結或帳號資訊準確無誤。</p>",
+		"en-US": "<h3>Order information</h3><p>This service is processed by an upstream provider. Check the order page for processing progress and results after payment.</p><h3>Required information</h3><p>Enter the required service information at checkout and verify that any link or account information is accurate.</p>",
+	}
 }
 
 // ensureProviderCatalogImageMigration replaces provider covers with a single
