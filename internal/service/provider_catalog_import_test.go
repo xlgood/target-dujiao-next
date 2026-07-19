@@ -112,8 +112,8 @@ func TestImportProviderCatalogCreatesProductsAndMappings(t *testing.T) {
 	if err := db.Preload("SKUs").First(&fansProduct, fansMapping.LocalProductID).Error; err != nil {
 		t.Fatalf("load fans product: %v", err)
 	}
-	if fansProduct.PriceQuantityBasis != 1000 || len(fansProduct.SKUs) != 1 || fansProduct.SKUs[0].PriceQuantityBasis != 1000 {
-		t.Fatalf("fans price basis product=%d skus=%+v, want 1000", fansProduct.PriceQuantityBasis, fansProduct.SKUs)
+	if fansProduct.PriceQuantityBasis != 1 || len(fansProduct.SKUs) != 1 || fansProduct.SKUs[0].PriceQuantityBasis != 1 {
+		t.Fatalf("unverified FansGurus basis product=%d skus=%+v, want placeholder 1", fansProduct.PriceQuantityBasis, fansProduct.SKUs)
 	}
 
 	var tgxMapping models.ProductMapping

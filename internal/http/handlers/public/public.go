@@ -34,7 +34,6 @@ type publicSKUView struct {
 // publicProductView 内部商品计算结构，装饰完成后转换为 dto.ProductResp
 type publicProductView struct {
 	models.Product
-	UpstreamFulfillment  bool
 	PromotionID          *uint
 	PromotionName        string
 	PromotionType        string
@@ -76,8 +75,6 @@ func (v *publicProductView) toProductResp() dto.ProductResp {
 			ManualStockTotal:     maskPublicStockInt(mode, sv.ManualStockTotal),
 			ManualStockSold:      maskPublicStockSold(mode, sv.ManualStockSold),
 			AutoStockAvailable:   maskPublicStockInt64(mode, sv.AutoStockAvailable),
-			UpstreamStock:        maskPublicStockInt(mode, sv.UpstreamStock),
-			UpstreamStockUnknown: sv.UpstreamStockUnknown,
 			StockStatus:          skuStatus,
 			StockDisplayMode:     skuDisplay.mode,
 			StockDisplay:         skuDisplay.display,
@@ -117,12 +114,10 @@ func (v *publicProductView) toProductResp() dto.ProductResp {
 		StockRangeMin:        productDisplay.rangeMin,
 		StockRangeMax:        productDisplay.rangeMax,
 		StockQuantityHidden:  productDisplay.quantityHidden,
-		FulfillmentType:      v.Product.FulfillmentType,
-		UpstreamFulfillment:  v.UpstreamFulfillment,
+		FulfillmentType:      customerFacingFulfillmentType(v.Product.FulfillmentType),
 		ManualFormSchema:     v.Product.ManualFormSchemaJSON,
 		ManualStockAvailable: maskPublicStockInt(mode, v.ManualStockAvailable),
 		AutoStockAvailable:   maskPublicStockInt64(mode, v.AutoStockAvailable),
-		UpstreamStockUnknown: v.UpstreamStockUnknown,
 		StockStatus:          v.StockStatus,
 		IsSoldOut:            v.IsSoldOut,
 		PaymentChannelIDs:    service.DecodeChannelIDs(v.Product.PaymentChannelIDs),
@@ -296,6 +291,13 @@ func maskPublicStockSold(mode string, value int) int {
 		return value
 	}
 	return 0
+}
+
+func customerFacingFulfillmentType(value string) string {
+	if strings.TrimSpace(value) == constants.FulfillmentTypeAuto {
+		return constants.FulfillmentTypeAuto
+	}
+	return constants.FulfillmentTypeManual
 }
 
 func (v *publicProductView) productStockQuantity() int64 {
@@ -951,8 +953,7 @@ func (h *Handler) decorateUpstreamStock(product *models.Product, item *publicPro
 		return
 	}
 
-	// 根据上游原始交付类型设置展示类型：auto 还是 manual
-	item.UpstreamFulfillment = true
+	// Map internal fulfillment metadata to a customer-facing delivery type.
 	displayType := mapping.UpstreamFulfillmentType
 	if displayType != constants.FulfillmentTypeAuto {
 		displayType = constants.FulfillmentTypeManual
@@ -973,7 +974,7 @@ func (h *Handler) decorateUpstreamStock(product *models.Product, item *publicPro
 		skuMappingByLocal[skuMappings[i].LocalSKUID] = &skuMappings[i]
 	}
 
-	// 填充每个 SKU 的上游库存，同时汇总商品级状态
+	// Populate each SKU's internal stock state, then aggregate the product.
 	hasUnlimited := false
 	totalStock := 0
 	hasActiveMapping := false

@@ -157,6 +157,93 @@ func ensureProviderCatalogContentMigration() error {
 	})
 }
 
+// ensureProviderCatalogCustomerCopyMigration removes legacy internal-chain
+// wording from customer-facing catalog copy without changing publication state.
+func ensureProviderCatalogCustomerCopyMigration() error {
+	if DB == nil {
+		return errors.New("database is not initialized")
+	}
+	var marker Setting
+	if err := DB.First(&marker, "key = ?", providerCatalogCustomerCopyMigrationSettingKey).Error; err == nil && migrationDone(marker.ValueJSON) {
+		return nil
+	} else if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		return err
+	}
+
+	return DB.Transaction(func(tx *gorm.DB) error {
+		var mappings []ProductMapping
+		if err := tx.Where("provider IN ? AND deleted_at IS NULL", []string{"tgx", "fansgurus"}).Find(&mappings).Error; err != nil {
+			return err
+		}
+		for _, mapping := range mappings {
+			var product Product
+			if err := tx.Where("id = ? AND deleted_at IS NULL", mapping.LocalProductID).First(&product).Error; err != nil {
+				if errors.Is(err, gorm.ErrRecordNotFound) {
+					continue
+				}
+				return err
+			}
+			description, descriptionChanged := sanitizeProviderCatalogCustomerCopy(product.DescriptionJSON)
+			content, contentChanged := sanitizeProviderCatalogCustomerCopy(product.ContentJSON)
+			if !descriptionChanged && !contentChanged {
+				continue
+			}
+			updates := map[string]interface{}{}
+			if descriptionChanged {
+				updates["description_json"] = description
+			}
+			if contentChanged {
+				updates["content_json"] = content
+			}
+			if err := tx.Model(&Product{}).Where("id = ?", product.ID).Updates(updates).Error; err != nil {
+				return err
+			}
+		}
+		return tx.Save(&Setting{
+			Key:       providerCatalogCustomerCopyMigrationSettingKey,
+			ValueJSON: JSON{"done": true, "migrated_at": time.Now().UTC().Format(time.RFC3339)},
+		}).Error
+	})
+}
+
+func sanitizeProviderCatalogCustomerCopy(content JSON) (JSON, bool) {
+	if len(content) == 0 {
+		return content, false
+	}
+	replacements := []struct{ old, new string }{
+		{"该服务由上游供应商处理。付款后请在订单页查看处理进度和结果。", "订单提交后，可在订单页面查看处理进度和结果。"},
+		{"本服务由上游供应商处理。付款后请在订单页查看处理进度和结果。", "订单提交后，可在订单页面查看处理进度和结果。"},
+		{"该服务由上游供应商处理。请在结算时准确填写服务所需资料。", "结算时请准确填写服务所需资料。"},
+		{"此服務由上游供應商處理。付款後請在訂單頁查看處理進度和結果。", "訂單提交後，可在訂單頁查看處理進度和結果。"},
+		{"本服務由上游供應商處理。付款後請在訂單頁查看處理進度和結果。", "訂單提交後，可在訂單頁查看處理進度和結果。"},
+		{"此服務由上游供應商處理。請在結算時準確填寫服務所需資料。", "結算時請準確填寫服務所需資料。"},
+		{"This service is processed by an upstream provider. Check the order page for processing progress and results after payment.", "After placing your order, check the order page for processing progress and results."},
+		{"This service is processed by an upstream provider. Please enter the required information accurately at checkout.", "Please enter the required information accurately at checkout."},
+		{"上游履约", "订单处理"},
+		{"上游履約", "訂單處理"},
+		{"上游库存", "库存"},
+		{"上游庫存", "庫存"},
+		{"Upstream fulfillment", "Order processing"},
+		{"Upstream stock", "Stock"},
+	}
+	result := make(JSON, len(content))
+	changed := false
+	for locale, value := range content {
+		text, ok := value.(string)
+		if !ok {
+			result[locale] = value
+			continue
+		}
+		clean := text
+		for _, replacement := range replacements {
+			clean = strings.ReplaceAll(clean, replacement.old, replacement.new)
+		}
+		result[locale] = clean
+		changed = changed || clean != text
+	}
+	return result, changed
+}
+
 func normalizeLocalizedContent(content JSON) string {
 	for _, value := range content {
 		if strings.TrimSpace(fmt.Sprint(value)) != "" {
@@ -176,17 +263,17 @@ func stripLocalizedHTML(content JSON) JSON {
 
 func providerCatalogBaselineDescription() JSON {
 	return JSON{
-		"zh-CN": "该服务由上游供应商处理。请在结算时准确填写服务所需资料。",
-		"zh-TW": "此服務由上游供應商處理。請在結算時準確填寫服務所需資料。",
-		"en-US": "This service is processed by an upstream provider. Please enter the required information accurately at checkout.",
+		"zh-CN": "结算时请准确填写服务所需资料。",
+		"zh-TW": "結算時請準確填寫服務所需資料。",
+		"en-US": "Please enter the required information accurately at checkout.",
 	}
 }
 
 func providerCatalogBaselineContent() JSON {
 	return JSON{
-		"zh-CN": "<h3>下单说明</h3><p>本服务由上游供应商处理。付款后请在订单页查看处理进度和结果。</p><h3>填写要求</h3><p>结算时请按要求填写服务所需资料，并确认链接或账号信息准确无误。</p>",
-		"zh-TW": "<h3>下單說明</h3><p>本服務由上游供應商處理。付款後請在訂單頁查看處理進度和結果。</p><h3>填寫要求</h3><p>結算時請按要求填寫服務所需資料，並確認連結或帳號資訊準確無誤。</p>",
-		"en-US": "<h3>Order information</h3><p>This service is processed by an upstream provider. Check the order page for processing progress and results after payment.</p><h3>Required information</h3><p>Enter the required service information at checkout and verify that any link or account information is accurate.</p>",
+		"zh-CN": "<h3>下单说明</h3><p>订单提交后，可在订单页面查看处理进度和结果。</p><h3>填写要求</h3><p>结算时请按要求填写服务所需资料，并确认链接或账号信息准确无误。</p>",
+		"zh-TW": "<h3>下單說明</h3><p>訂單提交後，可在訂單頁查看處理進度和結果。</p><h3>填寫要求</h3><p>結算時請按要求填寫服務所需資料，並確認連結或帳號資訊準確無誤。</p>",
+		"en-US": "<h3>Order information</h3><p>After placing your order, check the order page for processing progress and results.</p><h3>Required information</h3><p>Enter the required service information at checkout and verify that any link or account information is accurate.</p>",
 	}
 }
 
@@ -394,45 +481,6 @@ func ensureOrderItemOriginalPriceMigration() error {
 			},
 		}
 		return tx.Save(&marker).Error
-	})
-}
-
-// ensureFansGurusPriceBasisMigration marks catalog rows imported before the
-// price_quantity_basis field existed as prices per 1000 units.
-func ensureFansGurusPriceBasisMigration() error {
-	if DB == nil {
-		return errors.New("database is not initialized")
-	}
-	var marker Setting
-	if err := DB.First(&marker, "key = ?", fansGurusPriceBasisMigrationSettingKey).Error; err != nil {
-		if !errors.Is(err, gorm.ErrRecordNotFound) {
-			return err
-		}
-	} else if migrationDone(marker.ValueJSON) {
-		return nil
-	}
-
-	return DB.Transaction(func(tx *gorm.DB) error {
-		mappedProductIDs := tx.Model(&ProductMapping{}).
-			Select("local_product_id").
-			Where("provider = ?", "fansgurus")
-		if err := tx.Model(&Product{}).
-			Where("id IN (?)", mappedProductIDs).
-			Update("price_quantity_basis", 1000).Error; err != nil {
-			return err
-		}
-		if err := tx.Model(&ProductSKU{}).
-			Where("product_id IN (?)", mappedProductIDs).
-			Update("price_quantity_basis", 1000).Error; err != nil {
-			return err
-		}
-		return tx.Save(&Setting{
-			Key: fansGurusPriceBasisMigrationSettingKey,
-			ValueJSON: JSON{
-				"done":        true,
-				"migrated_at": time.Now().UTC().Format(time.RFC3339),
-			},
-		}).Error
 	})
 }
 

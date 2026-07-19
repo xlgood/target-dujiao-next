@@ -20,12 +20,12 @@ const (
 	categoryParentMigrationSettingKey               = "migration/category_parent_v1"
 	paymentProviderBepusdtRenameMigrationSettingKey = "migration/payment_provider_bepusdt_rename_v1"
 	orderItemOriginalPriceMigrationKey              = "migration/order_item_original_price_v1"
-	fansGurusPriceBasisMigrationSettingKey          = "migration/fansgurus_price_basis_v1"
 	providerCatalogImageMigrationSettingKey         = "migration/provider_catalog_images_v3"
 	providerCatalogImageRefreshMigrationSettingKey  = "migration/provider_catalog_images_v4"
 	providerCatalogPlatformCorrectionMigrationKey   = "migration/provider_catalog_platform_correction_v1"
 	tgxUnknownStockMigrationSettingKey              = "migration/tgx_unknown_stock_v1"
 	providerCatalogContentMigrationSettingKey       = "migration/provider_catalog_content_v1"
+	providerCatalogCustomerCopyMigrationSettingKey  = "migration/provider_catalog_customer_copy_v2"
 	catalogReviewMigrationSettingKey                = "migration/provider_catalog_review_v1"
 	catalogReviewCorrectionMigrationSettingKey      = "migration/provider_catalog_review_v2"
 	manualStockUnlimitedValue                       = -1
@@ -202,13 +202,13 @@ func AutoMigrate() error {
 	if err := ensureOrderItemOriginalPriceMigration(); err != nil {
 		return err
 	}
-	if err := ensureFansGurusPriceBasisMigration(); err != nil {
-		return err
-	}
 	if err := ensureTGXUnknownStockMigration(); err != nil {
 		return err
 	}
 	if err := ensureProviderCatalogContentMigration(); err != nil {
+		return err
+	}
+	if err := ensureProviderCatalogCustomerCopyMigration(); err != nil {
 		return err
 	}
 	if err := ensureProviderCatalogImageMigration(); err != nil {

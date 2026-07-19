@@ -128,7 +128,7 @@ func (s *ProductMappingService) importProviderCatalogItemInTx(tx *gorm.DB, conne
 		SeoMetaJSON:          models.JSON{},
 		ManualFormSchemaJSON: providerCatalogManualFormSchema(item),
 		PriceAmount:          models.NewMoneyFromDecimal(price),
-		PriceQuantityBasis:   providerCatalogPriceQuantityBasis(item),
+		PriceQuantityBasis:   catalogInitialPriceQuantityBasis(item),
 		CostPriceAmount:      models.NewMoneyFromDecimal(cost),
 		Images:               models.StringArray(item.Images),
 		SortOrder:            item.SortOrder,
@@ -222,7 +222,9 @@ func (s *ProductMappingService) refreshProviderCatalogItemInTx(tx *gorm.DB, mapp
 	if conn == nil || conn.AutoSyncPrice {
 		product.PriceAmount = models.NewMoneyFromDecimal(price)
 	}
-	product.PriceQuantityBasis = providerCatalogPriceQuantityBasis(item)
+	if basis := providerCatalogPriceQuantityBasis(item); basis > 0 {
+		product.PriceQuantityBasis = basis
+	}
 	product.CostPriceAmount = models.NewMoneyFromDecimal(cost)
 	product.MinPurchaseQuantity = item.MinQuantity
 	product.MaxPurchaseQuantity = item.MaxQuantity
@@ -269,7 +271,9 @@ func (s *ProductMappingService) refreshProviderVariantSKU(productSKURepo reposit
 	if conn == nil || conn.AutoSyncPrice {
 		sku.PriceAmount = models.NewMoneyFromDecimal(price)
 	}
-	sku.PriceQuantityBasis = providerCatalogPriceQuantityBasis(item)
+	if basis := providerCatalogPriceQuantityBasis(item); basis > 0 {
+		sku.PriceQuantityBasis = basis
+	}
 	sku.CostPriceAmount = models.NewMoneyFromDecimal(cost)
 	sku.SpecValuesJSON = providerVariantSpecValues(item.Provider, platform, variant)
 	if err := productSKURepo.Update(sku); err != nil {
@@ -310,7 +314,7 @@ func (s *ProductMappingService) createProviderVariantSKU(
 		SKUCode:            skuCode,
 		SpecValuesJSON:     providerVariantSpecValues(item.Provider, platform, variant),
 		PriceAmount:        models.NewMoneyFromDecimal(skuPrice),
-		PriceQuantityBasis: providerCatalogPriceQuantityBasis(item),
+		PriceQuantityBasis: catalogInitialPriceQuantityBasis(item),
 		CostPriceAmount:    models.NewMoneyFromDecimal(costPrice),
 		ManualStockTotal:   0,
 		IsActive:           variant.Active,
@@ -380,17 +384,17 @@ func providerCatalogContent(item upstream.ProviderCatalogItem) models.JSON {
 
 func providerCatalogServiceDescription() models.JSON {
 	return models.JSON{
-		"zh-CN": "该服务由上游供应商处理。请在结算时准确填写服务所需资料。",
-		"zh-TW": "此服務由上游供應商處理。請在結算時準確填寫服務所需資料。",
-		"en-US": "This service is processed by an upstream provider. Please enter the required information accurately at checkout.",
+		"zh-CN": "结算时请准确填写服务所需资料。",
+		"zh-TW": "結算時請準確填寫服務所需資料。",
+		"en-US": "Please enter the required information accurately at checkout.",
 	}
 }
 
 func providerCatalogServiceContent(item upstream.ProviderCatalogItem) models.JSON {
 	return models.JSON{
-		"zh-CN": "<h3>下单说明</h3><p>本服务由上游供应商处理。付款后请在订单页查看处理进度和结果。</p><h3>填写要求</h3><p>结算时请按要求填写服务所需资料，并确认链接或账号信息准确无误。</p>" + providerCatalogQuantityLine(item, "zh-CN"),
-		"zh-TW": "<h3>下單說明</h3><p>本服務由上游供應商處理。付款後請在訂單頁查看處理進度和結果。</p><h3>填寫要求</h3><p>結算時請按要求填寫服務所需資料，並確認連結或帳號資訊準確無誤。</p>" + providerCatalogQuantityLine(item, "zh-TW"),
-		"en-US": "<h3>Order information</h3><p>This service is processed by an upstream provider. Check the order page for processing progress and results after payment.</p><h3>Required information</h3><p>Enter the required service information at checkout and verify that any link or account information is accurate.</p>" + providerCatalogQuantityLine(item, "en-US"),
+		"zh-CN": "<h3>下单说明</h3><p>订单提交后，可在订单页面查看处理进度和结果。</p><h3>填写要求</h3><p>结算时请按要求填写服务所需资料，并确认链接或账号信息准确无误。</p>" + providerCatalogQuantityLine(item, "zh-CN"),
+		"zh-TW": "<h3>下單說明</h3><p>訂單提交後，可在訂單頁查看處理進度和結果。</p><h3>填寫要求</h3><p>結算時請按要求填寫服務所需資料，並確認連結或帳號資訊準確無誤。</p>" + providerCatalogQuantityLine(item, "zh-TW"),
+		"en-US": "<h3>Order information</h3><p>After placing your order, check the order page for processing progress and results.</p><h3>Required information</h3><p>Enter the required service information at checkout and verify that any link or account information is accurate.</p>" + providerCatalogQuantityLine(item, "en-US"),
 	}
 }
 
@@ -471,9 +475,18 @@ func providerCatalogPriceQuantityBasis(item upstream.ProviderCatalogItem) int {
 	if item.PriceQuantityBasis > 0 {
 		return item.PriceQuantityBasis
 	}
-	if item.Provider == upstream.CatalogProviderFansGurus {
-		return 1000
+	if item.Provider == upstream.CatalogProviderTGX {
+		return 1
 	}
+	return 0
+}
+
+func catalogInitialPriceQuantityBasis(item upstream.ProviderCatalogItem) int {
+	if basis := providerCatalogPriceQuantityBasis(item); basis > 0 {
+		return basis
+	}
+	// Model fields require a positive value. An unverified item is created
+	// unpublished, so this placeholder cannot become a public price.
 	return 1
 }
 

@@ -48,14 +48,6 @@ func (s *OrderService) buildOrderResult(input orderCreateParams) (*orderBuildRes
 	var promotionSeen bool
 	promotionSame := true
 	var noPromotionSeen bool
-	productQuantityTotals := make(map[uint]int, len(mergedItems))
-	for _, item := range mergedItems {
-		if item.ProductID == 0 || item.Quantity <= 0 {
-			continue
-		}
-		productQuantityTotals[item.ProductID] += item.Quantity
-	}
-
 	// 解析用户会员等级
 	var userMemberLevelID uint
 	var memberLevelIDSnapshot *uint
@@ -76,6 +68,14 @@ func (s *OrderService) buildOrderResult(input orderCreateParams) (*orderBuildRes
 	if manualFormData == nil {
 		manualFormData = map[string]models.JSON{}
 	}
+	productQuantityTotals := make(map[uint]int, len(mergedItems))
+	for _, item := range mergedItems {
+		if item.ProductID == 0 || item.Quantity <= 0 {
+			continue
+		}
+		submission := resolveManualFormSubmission(manualFormData, item.ProductID, item.SKUID)
+		productQuantityTotals[item.ProductID] += quantityForManualComments(item.Quantity, submission)
+	}
 	for _, item := range mergedItems {
 		if item.ProductID == 0 || item.Quantity <= 0 {
 			return nil, ErrInvalidOrderItem
@@ -87,9 +87,6 @@ func (s *OrderService) buildOrderResult(input orderCreateParams) (*orderBuildRes
 		if product == nil || !product.IsActive {
 			return nil, ErrProductNotAvailable
 		}
-		if err := validateProductPurchaseQuantity(product, item.Quantity); err != nil {
-			return nil, err
-		}
 		purchaseType := strings.TrimSpace(product.PurchaseType)
 		if purchaseType == "" {
 			purchaseType = constants.ProductPurchaseMember
@@ -99,6 +96,24 @@ func (s *OrderService) buildOrderResult(input orderCreateParams) (*orderBuildRes
 		}
 		sku, err := resolveProductOrderSKU(s.productSKURepo, product, item.SKUID)
 		if err != nil {
+			return nil, err
+		}
+
+		submission := resolveManualFormSubmission(manualFormData, product.ID, sku.ID)
+		manualSchemaSnapshot := models.JSON{}
+		manualSubmission := models.JSON{}
+		fulfillmentForForm := strings.TrimSpace(product.FulfillmentType)
+		if !input.SkipManualFormCheck && (fulfillmentForForm == constants.FulfillmentTypeManual ||
+			(fulfillmentForForm == constants.FulfillmentTypeUpstream && len(product.ManualFormSchemaJSON) > 0)) {
+			normalizedSchema, normalizedSubmission, err := validateAndNormalizeManualForm(product.ManualFormSchemaJSON, submission)
+			if err != nil {
+				return nil, err
+			}
+			manualSchemaSnapshot = normalizedSchema
+			manualSubmission = normalizedSubmission
+		}
+		effectiveQuantity := quantityForManualComments(item.Quantity, submission)
+		if err := validateProductPurchaseQuantity(product, effectiveQuantity); err != nil {
 			return nil, err
 		}
 
@@ -113,7 +128,7 @@ func (s *OrderService) buildOrderResult(input orderCreateParams) (*orderBuildRes
 		promoUnitPriceAmount := basePrice
 		if promotionService != nil && priceQuantityBasis == 1 {
 			var promoUnitPrice models.Money
-			promotion, promoUnitPrice, err = promotionService.ApplyPromotion(&priceCarrier, item.Quantity)
+			promotion, promoUnitPrice, err = promotionService.ApplyPromotion(&priceCarrier, effectiveQuantity)
 			if err != nil {
 				return nil, err
 			}
@@ -124,18 +139,18 @@ func (s *OrderService) buildOrderResult(input orderCreateParams) (*orderBuildRes
 		unitPriceAmount := promoUnitPriceAmount
 		promotionDiscount := decimal.Zero
 		if promotion != nil && basePrice.GreaterThan(promoUnitPriceAmount) {
-			promotionDiscount = amountForQuantity(basePrice.Sub(promoUnitPriceAmount), item.Quantity, priceQuantityBasis)
+			promotionDiscount = amountForQuantity(basePrice.Sub(promoUnitPriceAmount), effectiveQuantity, priceQuantityBasis)
 		}
 
 		wholesaleMatchQuantity := productQuantityTotals[item.ProductID]
 		if wholesaleMatchQuantity <= 0 {
-			wholesaleMatchQuantity = item.Quantity
+			wholesaleMatchQuantity = effectiveQuantity
 		}
 		var wholesaleUnitPrice decimal.Decimal
 		wholesaleDiscount := decimal.Zero
 		wholesaleMatched := false
 		if !resellerOrder && priceQuantityBasis == 1 {
-			wholesaleUnitPrice, wholesaleDiscount, wholesaleMatched = ResolveWholesaleUnitPriceForSKU(product, basePrice, sku.ID, sku.SKUCode, wholesaleMatchQuantity, item.Quantity)
+			wholesaleUnitPrice, wholesaleDiscount, wholesaleMatched = ResolveWholesaleUnitPriceForSKU(product, basePrice, sku.ID, sku.SKUCode, wholesaleMatchQuantity, effectiveQuantity)
 		}
 		if wholesaleMatched && wholesaleUnitPrice.LessThan(unitPriceAmount) {
 			unitPriceAmount = wholesaleUnitPrice
@@ -154,7 +169,7 @@ func (s *OrderService) buildOrderResult(input orderCreateParams) (*orderBuildRes
 		if !resellerOrder && priceQuantityBasis == 1 && userMemberLevelID > 0 && s.memberLevelService != nil {
 			memberUnitPrice, _ := s.memberLevelService.ResolveMemberPrice(userMemberLevelID, product.ID, sku.ID, unitPriceAmount)
 			if memberUnitPrice.LessThan(unitPriceAmount) {
-				itemMemberDiscount = amountForQuantity(unitPriceAmount.Sub(memberUnitPrice), item.Quantity, priceQuantityBasis)
+				itemMemberDiscount = amountForQuantity(unitPriceAmount.Sub(memberUnitPrice), effectiveQuantity, priceQuantityBasis)
 				memberDiscountAmount = memberDiscountAmount.Add(itemMemberDiscount).Round(2)
 				unitPriceAmount = memberUnitPrice
 			}
@@ -169,8 +184,8 @@ func (s *OrderService) buildOrderResult(input orderCreateParams) (*orderBuildRes
 			return nil, ErrProductPriceInvalid
 		}
 
-		baseTotal := amountForQuantity(basePrice, item.Quantity, priceQuantityBasis)
-		total := amountForQuantity(unitPriceAmount, item.Quantity, priceQuantityBasis)
+		baseTotal := amountForQuantity(basePrice, effectiveQuantity, priceQuantityBasis)
+		total := amountForQuantity(unitPriceAmount, effectiveQuantity, priceQuantityBasis)
 		originalAmount = originalAmount.Add(baseTotal).Round(2)
 		fulfillmentType := strings.TrimSpace(product.FulfillmentType)
 		if fulfillmentType == "" {
@@ -181,26 +196,13 @@ func (s *OrderService) buildOrderResult(input orderCreateParams) (*orderBuildRes
 		}
 		if fulfillmentType == constants.FulfillmentTypeManual &&
 			shouldEnforceManualSKUStock(product, sku) &&
-			manualSKUAvailable(sku) < item.Quantity {
+			manualSKUAvailable(sku) < effectiveQuantity {
 			return nil, ErrManualStockInsufficient
 		}
 		if fulfillmentType == constants.FulfillmentTypeUpstream && s.productMappingService != nil {
-			if err := s.productMappingService.EnsureUpstreamStockForOrder(sku.ID, item.Quantity); err != nil {
+			if err := s.productMappingService.EnsureUpstreamStockForOrder(sku.ID, effectiveQuantity); err != nil {
 				return nil, err
 			}
-		}
-
-		manualSchemaSnapshot := models.JSON{}
-		manualSubmission := models.JSON{}
-		if !input.SkipManualFormCheck && (fulfillmentType == constants.FulfillmentTypeManual ||
-			(fulfillmentType == constants.FulfillmentTypeUpstream && len(product.ManualFormSchemaJSON) > 0)) {
-			submission := resolveManualFormSubmission(manualFormData, product.ID, sku.ID)
-			normalizedSchema, normalizedSubmission, err := validateAndNormalizeManualForm(product.ManualFormSchemaJSON, submission)
-			if err != nil {
-				return nil, err
-			}
-			manualSchemaSnapshot = normalizedSchema
-			manualSubmission = normalizedSubmission
 		}
 
 		var promotionID *uint
@@ -232,7 +234,7 @@ func (s *OrderService) buildOrderResult(input orderCreateParams) (*orderBuildRes
 			UnitPrice:                    models.NewMoneyFromDecimal(unitPriceAmount),
 			PriceQuantityBasis:           priceQuantityBasis,
 			CostPrice:                    sku.CostPriceAmount, // 成本价快照
-			Quantity:                     item.Quantity,
+			Quantity:                     effectiveQuantity,
 			OriginalTotalPrice:           models.NewMoneyFromDecimal(baseTotal),
 			TotalPrice:                   models.NewMoneyFromDecimal(total),
 			MemberDiscount:               models.NewMoneyFromDecimal(itemMemberDiscount),
@@ -369,6 +371,26 @@ func resolveManualFormSubmission(manualFormData map[string]models.JSON, productI
 	}
 
 	return models.JSON{}
+}
+
+// quantityForManualComments makes custom-comment services charge and snapshot
+// the number of submitted non-empty comment lines, rather than a stale cart
+// quantity chosen before the comments were entered.
+func quantityForManualComments(fallback int, submission models.JSON) int {
+	comments, ok := submission["comments"].(string)
+	if !ok || strings.TrimSpace(comments) == "" {
+		return fallback
+	}
+	count := 0
+	for _, line := range strings.Split(comments, "\n") {
+		if strings.TrimSpace(line) != "" {
+			count++
+		}
+	}
+	if count > 0 {
+		return count
+	}
+	return fallback
 }
 
 func firstProductImage(images models.StringArray) string {

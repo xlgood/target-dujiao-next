@@ -111,14 +111,15 @@ func (h *Handler) GetAdminProduct(c *gin.Context) {
 // ====================  商品管理  ====================
 
 type ProductSKURequest struct {
-	ID               uint                   `json:"id"`
-	SKUCode          string                 `json:"sku_code" binding:"required"`
-	SpecValuesJSON   map[string]interface{} `json:"spec_values"`
-	PriceAmount      float64                `json:"price_amount" binding:"required"`
-	CostPriceAmount  float64                `json:"cost_price_amount"`
-	ManualStockTotal int                    `json:"manual_stock_total"`
-	IsActive         *bool                  `json:"is_active"`
-	SortOrder        int                    `json:"sort_order"`
+	ID                 uint                   `json:"id"`
+	SKUCode            string                 `json:"sku_code" binding:"required"`
+	SpecValuesJSON     map[string]interface{} `json:"spec_values"`
+	PriceAmount        float64                `json:"price_amount" binding:"required"`
+	PriceQuantityBasis int                    `json:"price_quantity_basis"`
+	CostPriceAmount    float64                `json:"cost_price_amount"`
+	ManualStockTotal   int                    `json:"manual_stock_total"`
+	IsActive           *bool                  `json:"is_active"`
+	SortOrder          int                    `json:"sort_order"`
 }
 
 type WholesalePriceRequest struct {
@@ -139,6 +140,7 @@ type CreateProductRequest struct {
 	InstructionsJSON    map[string]interface{}   `json:"instructions"`
 	ManualFormSchema    map[string]interface{}   `json:"manual_form_schema"`
 	PriceAmount         float64                  `json:"price_amount" binding:"required"`
+	PriceQuantityBasis  int                      `json:"price_quantity_basis"`
 	CostPriceAmount     float64                  `json:"cost_price_amount"`
 	WholesalePrices     *[]WholesalePriceRequest `json:"wholesale_prices"`
 	Images              []string                 `json:"images"`
@@ -181,14 +183,15 @@ func toProductSKUInputs(items []ProductSKURequest) []service.ProductSKUInput {
 	result := make([]service.ProductSKUInput, 0, len(items))
 	for _, item := range items {
 		result = append(result, service.ProductSKUInput{
-			ID:               item.ID,
-			SKUCode:          item.SKUCode,
-			SpecValuesJSON:   item.SpecValuesJSON,
-			PriceAmount:      decimal.NewFromFloat(item.PriceAmount),
-			CostPriceAmount:  decimal.NewFromFloat(item.CostPriceAmount),
-			ManualStockTotal: item.ManualStockTotal,
-			IsActive:         item.IsActive,
-			SortOrder:        item.SortOrder,
+			ID:                 item.ID,
+			SKUCode:            item.SKUCode,
+			SpecValuesJSON:     item.SpecValuesJSON,
+			PriceAmount:        decimal.NewFromFloat(item.PriceAmount),
+			PriceQuantityBasis: item.PriceQuantityBasis,
+			CostPriceAmount:    decimal.NewFromFloat(item.CostPriceAmount),
+			ManualStockTotal:   item.ManualStockTotal,
+			IsActive:           item.IsActive,
+			SortOrder:          item.SortOrder,
 		})
 	}
 	return result
@@ -212,6 +215,7 @@ func (h *Handler) CreateProduct(c *gin.Context) {
 		InstructionsJSON:     req.InstructionsJSON,
 		ManualFormSchemaJSON: req.ManualFormSchema,
 		PriceAmount:          decimal.NewFromFloat(req.PriceAmount),
+		PriceQuantityBasis:   req.PriceQuantityBasis,
 		CostPriceAmount:      decimal.NewFromFloat(req.CostPriceAmount),
 		WholesalePrices:      toWholesalePriceInputs(req.WholesalePrices),
 		Images:               req.Images,
@@ -308,6 +312,7 @@ func (h *Handler) UpdateProduct(c *gin.Context) {
 		InstructionsJSON:     req.InstructionsJSON,
 		ManualFormSchemaJSON: req.ManualFormSchema,
 		PriceAmount:          decimal.NewFromFloat(req.PriceAmount),
+		PriceQuantityBasis:   req.PriceQuantityBasis,
 		CostPriceAmount:      decimal.NewFromFloat(req.CostPriceAmount),
 		WholesalePrices:      toWholesalePriceInputs(req.WholesalePrices),
 		Images:               req.Images,

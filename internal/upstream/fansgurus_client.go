@@ -72,6 +72,28 @@ type FansGurusService struct {
 	Dripfeed bool   `json:"dripfeed"`
 	Refill   bool   `json:"refill"`
 	Cancel   bool   `json:"cancel"`
+	// Raw preserves fields added by the remote API so catalog normalization can
+	// use an explicit quantity basis when one is supplied.
+	Raw json.RawMessage `json:"-"`
+}
+
+func (s *FansGurusService) UnmarshalJSON(data []byte) error {
+	type serviceAlias FansGurusService
+	var decoded serviceAlias
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	*s = FansGurusService(decoded)
+	s.Raw = append(s.Raw[:0], data...)
+	return nil
+}
+
+func (s FansGurusService) MarshalJSON() ([]byte, error) {
+	if len(s.Raw) > 0 && json.Valid(s.Raw) {
+		return s.Raw, nil
+	}
+	type serviceAlias FansGurusService
+	return json.Marshal(serviceAlias(s))
 }
 
 type FansGurusAddOrderRequest struct {

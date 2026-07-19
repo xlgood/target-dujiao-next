@@ -100,20 +100,29 @@ func TestDecoratePublicProductTGXPendingStockIsNotUnlimited(t *testing.T) {
 	if err != nil {
 		t.Fatalf("decorate product: %v", err)
 	}
-	if resp.StockStatus != constants.ProductStockStatusPending || !resp.UpstreamStockUnknown {
-		t.Fatalf("unexpected product stock state: status=%q unknown=%t", resp.StockStatus, resp.UpstreamStockUnknown)
+	if resp.StockStatus != constants.ProductStockStatusPending {
+		t.Fatalf("unexpected product stock state: status=%q", resp.StockStatus)
 	}
 	if resp.StockDisplay != constants.ProductStockStatusPending {
 		t.Fatalf("expected pending display, got %q", resp.StockDisplay)
 	}
-	if !resp.UpstreamFulfillment || resp.FulfillmentType != constants.FulfillmentTypeManual {
-		t.Fatalf("expected upstream fulfillment display, got upstream=%t type=%q", resp.UpstreamFulfillment, resp.FulfillmentType)
+	if resp.FulfillmentType != constants.FulfillmentTypeManual {
+		t.Fatalf("expected customer fulfillment display to be manual, got type=%q", resp.FulfillmentType)
 	}
 	if len(resp.SKUs) != 1 {
 		t.Fatalf("expected one SKU, got %d", len(resp.SKUs))
 	}
-	if resp.SKUs[0].StockStatus != constants.ProductStockStatusPending || !resp.SKUs[0].UpstreamStockUnknown || resp.SKUs[0].UpstreamStock != 0 {
+	if resp.SKUs[0].StockStatus != constants.ProductStockStatusPending {
 		t.Fatalf("unexpected SKU stock state: %+v", resp.SKUs[0])
+	}
+}
+
+func TestPublicProductResponseMasksInternalFulfillmentType(t *testing.T) {
+	resp := (&publicProductView{Product: models.Product{
+		FulfillmentType: constants.FulfillmentTypeUpstream,
+	}}).toProductResp()
+	if resp.FulfillmentType != constants.FulfillmentTypeManual {
+		t.Fatalf("expected customer fulfillment display to be manual, got type=%q", resp.FulfillmentType)
 	}
 }
 

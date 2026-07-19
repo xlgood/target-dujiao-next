@@ -154,8 +154,8 @@ func TestProviderCatalogItemPriceRules(t *testing.T) {
 	if fansItem.TargetPrice != "2.00" {
 		t.Fatalf("fans target=%s, want raw upstream amount", fansItem.TargetPrice)
 	}
-	if fansItem.PriceQuantityBasis != 1000 {
-		t.Fatalf("fans price quantity basis=%d, want 1000", fansItem.PriceQuantityBasis)
+	if fansItem.PriceQuantityBasis != 0 {
+		t.Fatalf("fans price quantity basis=%d, want unknown", fansItem.PriceQuantityBasis)
 	}
 	if fansItem.MinQuantity != 500 || fansItem.MaxQuantity != 10000 {
 		t.Fatalf("fans quantity range=%d/%d", fansItem.MinQuantity, fansItem.MaxQuantity)
@@ -176,6 +176,17 @@ func TestProviderCatalogItemPriceRules(t *testing.T) {
 	}
 	if tgxItem.PriceQuantityBasis != 1 {
 		t.Fatalf("tgx price quantity basis=%d, want 1", tgxItem.PriceQuantityBasis)
+	}
+}
+
+func TestFansGurusCatalogItemUsesExplicitQuantityBasis(t *testing.T) {
+	service := FansGurusService{Service: 123, Name: "Instagram Followers", Category: "Instagram", Rate: "2.00", Raw: json.RawMessage(`{"service":123,"price_per":"1000"}`)}
+	item, err := NewFansGurusCatalogItem(service)
+	if err != nil {
+		t.Fatalf("NewFansGurusCatalogItem: %v", err)
+	}
+	if item.PriceQuantityBasis != 1000 {
+		t.Fatalf("basis=%d, want 1000", item.PriceQuantityBasis)
 	}
 }
 

@@ -112,6 +112,7 @@ type CreateProductInput struct {
 	InstructionsJSON     map[string]interface{}
 	ManualFormSchemaJSON map[string]interface{}
 	PriceAmount          decimal.Decimal
+	PriceQuantityBasis   int
 	CostPriceAmount      decimal.Decimal
 	// WholesalePrices 为可选字段：nil 表示「不修改」（Update 时保留原有批发价），
 	// 非 nil（含空切片）表示以传入内容整体覆盖。Create 时 nil 与空切片等价于无批发价。
@@ -139,14 +140,15 @@ type WholesalePriceInput struct {
 }
 
 type ProductSKUInput struct {
-	ID               uint
-	SKUCode          string
-	SpecValuesJSON   map[string]interface{}
-	PriceAmount      decimal.Decimal
-	CostPriceAmount  decimal.Decimal
-	ManualStockTotal int
-	IsActive         *bool
-	SortOrder        int
+	ID                 uint
+	SKUCode            string
+	SpecValuesJSON     map[string]interface{}
+	PriceAmount        decimal.Decimal
+	PriceQuantityBasis int
+	CostPriceAmount    decimal.Decimal
+	ManualStockTotal   int
+	IsActive           *bool
+	SortOrder          int
 }
 
 // ListPublic 获取公开商品列表
@@ -380,6 +382,7 @@ func (s *ProductService) Create(input CreateProductInput) (*models.Product, erro
 		InstructionsJSON:     models.JSON(input.InstructionsJSON),
 		ManualFormSchemaJSON: models.JSON{},
 		PriceAmount:          models.NewMoneyFromDecimal(priceAmount),
+		PriceQuantityBasis:   NormalizePriceQuantityBasis(input.PriceQuantityBasis),
 		CostPriceAmount:      models.NewMoneyFromDecimal(costPriceAmount),
 		WholesalePrices:      models.WholesalePriceTiers{},
 		Images:               models.StringArray(input.Images),
@@ -490,6 +493,9 @@ func (s *ProductService) Update(id string, input CreateProductInput) (*models.Pr
 	product.InstructionsJSON = models.JSON(input.InstructionsJSON)
 	product.ManualFormSchemaJSON = models.JSON{}
 	product.PriceAmount = models.NewMoneyFromDecimal(priceAmount)
+	if input.PriceQuantityBasis > 0 {
+		product.PriceQuantityBasis = NormalizePriceQuantityBasis(input.PriceQuantityBasis)
+	}
 	product.SortOrder = input.SortOrder
 	product.Images = models.StringArray(input.Images)
 	product.Tags = models.StringArray(input.Tags)
@@ -641,16 +647,17 @@ func syncSingleProductSKU(skuRepo repository.ProductSKURepository, productID uin
 			return nil
 		}
 		return skuRepo.Create(&models.ProductSKU{
-			ProductID:         productID,
-			SKUCode:           models.DefaultSKUCode,
-			SpecValuesJSON:    models.JSON{},
-			PriceAmount:       models.NewMoneyFromDecimal(priceAmount),
-			CostPriceAmount:   models.NewMoneyFromDecimal(costPriceAmount),
-			ManualStockTotal:  manualStockTotal,
-			ManualStockLocked: 0,
-			ManualStockSold:   0,
-			IsActive:          true,
-			SortOrder:         0,
+			ProductID:          productID,
+			SKUCode:            models.DefaultSKUCode,
+			SpecValuesJSON:     models.JSON{},
+			PriceAmount:        models.NewMoneyFromDecimal(priceAmount),
+			PriceQuantityBasis: 1,
+			CostPriceAmount:    models.NewMoneyFromDecimal(costPriceAmount),
+			ManualStockTotal:   manualStockTotal,
+			ManualStockLocked:  0,
+			ManualStockSold:    0,
+			IsActive:           true,
+			SortOrder:          0,
 		})
 	}
 	targetIndex := pickSingleModeTargetSKUIndex(skus)
@@ -709,14 +716,15 @@ func pickSingleModeTargetSKUIndex(skus []models.ProductSKU) int {
 }
 
 type normalizedProductSKU struct {
-	ID               uint
-	SKUCode          string
-	SpecValuesJSON   models.JSON
-	PriceAmount      models.Money
-	CostPriceAmount  models.Money
-	ManualStockTotal int
-	IsActive         bool
-	SortOrder        int
+	ID                 uint
+	SKUCode            string
+	SpecValuesJSON     models.JSON
+	PriceAmount        models.Money
+	PriceQuantityBasis int
+	CostPriceAmount    models.Money
+	ManualStockTotal   int
+	IsActive           bool
+	SortOrder          int
 }
 
 func normalizeProductSKUInputs(inputs []ProductSKUInput, fulfillmentType string, existingSKUMap map[uint]models.ProductSKU) ([]normalizedProductSKU, decimal.Decimal, int, error) {
@@ -763,6 +771,10 @@ func normalizeProductSKUInputs(inputs []ProductSKUInput, fulfillmentType string,
 				return nil, decimal.Zero, 0, ErrProductSKUInvalid
 			}
 		}
+		priceQuantityBasis := input.PriceQuantityBasis
+		if priceQuantityBasis <= 0 && existingSKUMap != nil && input.ID > 0 {
+			priceQuantityBasis = existingSKUMap[input.ID].PriceQuantityBasis
+		}
 
 		isActive := true
 		if input.IsActive != nil {
@@ -774,14 +786,15 @@ func normalizeProductSKUInputs(inputs []ProductSKUInput, fulfillmentType string,
 		}
 
 		normalized = append(normalized, normalizedProductSKU{
-			ID:               input.ID,
-			SKUCode:          skuCode,
-			SpecValuesJSON:   specValues,
-			PriceAmount:      models.NewMoneyFromDecimal(priceAmount),
-			CostPriceAmount:  models.NewMoneyFromDecimal(costPriceAmount),
-			ManualStockTotal: manualTotal,
-			IsActive:         isActive,
-			SortOrder:        input.SortOrder,
+			ID:                 input.ID,
+			SKUCode:            skuCode,
+			SpecValuesJSON:     specValues,
+			PriceAmount:        models.NewMoneyFromDecimal(priceAmount),
+			PriceQuantityBasis: NormalizePriceQuantityBasis(priceQuantityBasis),
+			CostPriceAmount:    models.NewMoneyFromDecimal(costPriceAmount),
+			ManualStockTotal:   manualTotal,
+			IsActive:           isActive,
+			SortOrder:          input.SortOrder,
 		})
 
 		if isActive {
@@ -861,6 +874,7 @@ func applyProductSKUsWithStockGuard(
 			existing.SKUCode = row.SKUCode
 			existing.SpecValuesJSON = row.SpecValuesJSON
 			existing.PriceAmount = row.PriceAmount
+			existing.PriceQuantityBasis = row.PriceQuantityBasis
 			existing.CostPriceAmount = row.CostPriceAmount
 			existing.ManualStockTotal = row.ManualStockTotal
 			existing.IsActive = row.IsActive
@@ -877,6 +891,7 @@ func applyProductSKUsWithStockGuard(
 		if existing, ok := existingByCode[codeKey]; ok {
 			existing.SpecValuesJSON = row.SpecValuesJSON
 			existing.PriceAmount = row.PriceAmount
+			existing.PriceQuantityBasis = row.PriceQuantityBasis
 			existing.CostPriceAmount = row.CostPriceAmount
 			existing.ManualStockTotal = row.ManualStockTotal
 			existing.IsActive = row.IsActive
@@ -893,16 +908,17 @@ func applyProductSKUsWithStockGuard(
 			return err
 		}
 		item := models.ProductSKU{
-			ProductID:         productID,
-			SKUCode:           row.SKUCode,
-			SpecValuesJSON:    row.SpecValuesJSON,
-			PriceAmount:       row.PriceAmount,
-			CostPriceAmount:   row.CostPriceAmount,
-			ManualStockTotal:  row.ManualStockTotal,
-			ManualStockLocked: 0,
-			ManualStockSold:   0,
-			IsActive:          row.IsActive,
-			SortOrder:         row.SortOrder,
+			ProductID:          productID,
+			SKUCode:            row.SKUCode,
+			SpecValuesJSON:     row.SpecValuesJSON,
+			PriceAmount:        row.PriceAmount,
+			PriceQuantityBasis: row.PriceQuantityBasis,
+			CostPriceAmount:    row.CostPriceAmount,
+			ManualStockTotal:   row.ManualStockTotal,
+			ManualStockLocked:  0,
+			ManualStockSold:    0,
+			IsActive:           row.IsActive,
+			SortOrder:          row.SortOrder,
 		}
 		if err := skuRepo.Create(&item); err != nil {
 			return err

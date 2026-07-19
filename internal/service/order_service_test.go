@@ -96,6 +96,15 @@ func TestResolveManualFormSubmissionFallbackLegacyProductKey(t *testing.T) {
 	}
 }
 
+func TestQuantityForManualCommentsUsesNonEmptyLines(t *testing.T) {
+	if got := quantityForManualComments(99, models.JSON{"comments": " first\n\nsecond\n  "}); got != 2 {
+		t.Fatalf("quantity=%d, want 2", got)
+	}
+	if got := quantityForManualComments(7, models.JSON{}); got != 7 {
+		t.Fatalf("fallback quantity=%d, want 7", got)
+	}
+}
+
 type orderPurchaseQuantityLimitFixture struct {
 	dsnPrefix       string
 	categorySlug    string

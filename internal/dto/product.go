@@ -29,11 +29,9 @@ type ProductResp struct {
 	StockRangeMax        *int                 `json:"stock_range_max,omitempty"`
 	StockQuantityHidden  bool                 `json:"stock_quantity_hidden"`
 	FulfillmentType      string               `json:"fulfillment_type"`
-	UpstreamFulfillment  bool                 `json:"upstream_fulfillment"`
 	ManualFormSchema     models.JSON          `json:"manual_form_schema"`
 	ManualStockAvailable int                  `json:"manual_stock_available"`
 	AutoStockAvailable   int64                `json:"auto_stock_available"`
-	UpstreamStockUnknown bool                 `json:"upstream_stock_unknown"`
 	StockStatus          string               `json:"stock_status"`
 	IsSoldOut            bool                 `json:"is_sold_out"`
 
@@ -86,24 +84,22 @@ func NewWholesalePriceRespList(tiers models.WholesalePriceTiers) []WholesalePric
 
 // SKUResp 商品 SKU 公共响应
 type SKUResp struct {
-	ID                   uint         `json:"id"`
-	SKUCode              string       `json:"sku_code"`
-	SpecValues           models.JSON  `json:"spec_values"`
-	PriceAmount          models.Money `json:"price_amount"`
-	PriceQuantityBasis   int          `json:"price_quantity_basis"`
-	ManualStockTotal     int          `json:"manual_stock_total"`
-	ManualStockSold      int          `json:"manual_stock_sold"`
-	AutoStockAvailable   int64        `json:"auto_stock_available"`
-	UpstreamStock        int          `json:"upstream_stock"`
-	UpstreamStockUnknown bool         `json:"upstream_stock_unknown"`
-	StockStatus          string       `json:"stock_status"`
-	StockDisplayMode     string       `json:"stock_display_mode"`
-	StockDisplay         string       `json:"stock_display"`
-	StockRangeMin        *int         `json:"stock_range_min,omitempty"`
-	StockRangeMax        *int         `json:"stock_range_max,omitempty"`
-	StockQuantityHidden  bool         `json:"stock_quantity_hidden"`
-	IsSoldOut            bool         `json:"is_sold_out"`
-	IsActive             bool         `json:"is_active"`
+	ID                  uint         `json:"id"`
+	SKUCode             string       `json:"sku_code"`
+	SpecValues          models.JSON  `json:"spec_values"`
+	PriceAmount         models.Money `json:"price_amount"`
+	PriceQuantityBasis  int          `json:"price_quantity_basis"`
+	ManualStockTotal    int          `json:"manual_stock_total"`
+	ManualStockSold     int          `json:"manual_stock_sold"`
+	AutoStockAvailable  int64        `json:"auto_stock_available"`
+	StockStatus         string       `json:"stock_status"`
+	StockDisplayMode    string       `json:"stock_display_mode"`
+	StockDisplay        string       `json:"stock_display"`
+	StockRangeMin       *int         `json:"stock_range_min,omitempty"`
+	StockRangeMax       *int         `json:"stock_range_max,omitempty"`
+	StockQuantityHidden bool         `json:"stock_quantity_hidden"`
+	IsSoldOut           bool         `json:"is_sold_out"`
+	IsActive            bool         `json:"is_active"`
 
 	// 促销/会员价附加
 	PromotionPriceAmount *models.Money `json:"promotion_price_amount,omitempty"`

@@ -134,11 +134,45 @@ func NewFansGurusCatalogItem(service FansGurusService) (ProviderCatalogItem, err
 		// The connection's configurable exchange/markup settings determine the
 		// local sale price during import. Keep the upstream amount unchanged here.
 		TargetPrice:        service.Rate,
-		PriceQuantityBasis: 1000,
+		PriceQuantityBasis: FansGurusServicePriceQuantityBasis(service),
 		MinQuantity:        service.Min,
 		MaxQuantity:        service.Max,
 		Active:             FansGurusServiceTypeSupported(service.Type),
 	}, nil
+}
+
+// FansGurusServicePriceQuantityBasis returns a basis only when the service
+// response explicitly provides one. The documented core fields do not include
+// a basis, so callers must not infer one from the provider name or service type.
+func FansGurusServicePriceQuantityBasis(service FansGurusService) int {
+	if len(service.Raw) == 0 {
+		return 0
+	}
+	var raw map[string]interface{}
+	if err := json.Unmarshal(service.Raw, &raw); err != nil {
+		return 0
+	}
+	for _, key := range []string{"price_quantity_basis", "price_per", "rate_per", "quantity_basis"} {
+		if basis := positiveCatalogQuantityBasis(raw[key]); basis > 0 {
+			return basis
+		}
+	}
+	return 0
+}
+
+func positiveCatalogQuantityBasis(value interface{}) int {
+	switch typed := value.(type) {
+	case float64:
+		if typed > 0 && typed == float64(int(typed)) && typed <= 1000000 {
+			return int(typed)
+		}
+	case string:
+		parsed, err := strconv.Atoi(strings.TrimSpace(typed))
+		if err == nil && parsed > 0 && parsed <= 1000000 {
+			return parsed
+		}
+	}
+	return 0
 }
 
 // FansGurusServiceTypeSupported is intentionally conservative: procurement

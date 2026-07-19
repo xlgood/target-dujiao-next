@@ -169,6 +169,38 @@ func TestSyncSingleProductSKU_NoActivePrefersDefaultCode(t *testing.T) {
 	}
 }
 
+func TestProductServiceUpdatePreservesSKUPriceQuantityBasis(t *testing.T) {
+	svc, db := newProductServiceForTest(t)
+	category := models.Category{Slug: "price-basis-update", NameJSON: models.JSON{"zh-CN": "price-basis-update"}}
+	if err := db.Create(&category).Error; err != nil {
+		t.Fatalf("create category: %v", err)
+	}
+	product := models.Product{CategoryID: category.ID, Slug: "price-basis-product", TitleJSON: models.JSON{"zh-CN": "price-basis"}, PriceAmount: models.NewMoneyFromDecimal(decimal.NewFromInt(10)), PriceQuantityBasis: 1000, PurchaseType: constants.ProductPurchaseMember, FulfillmentType: constants.FulfillmentTypeUpstream, IsActive: true}
+	if err := db.Create(&product).Error; err != nil {
+		t.Fatalf("create product: %v", err)
+	}
+	sku := models.ProductSKU{ProductID: product.ID, SKUCode: models.DefaultSKUCode, PriceAmount: models.NewMoneyFromDecimal(decimal.NewFromInt(10)), PriceQuantityBasis: 1000, IsActive: true}
+	if err := db.Create(&sku).Error; err != nil {
+		t.Fatalf("create sku: %v", err)
+	}
+
+	_, err := svc.Update(strconv.FormatUint(uint64(product.ID), 10), CreateProductInput{
+		CategoryID: category.ID, Slug: product.Slug, TitleJSON: map[string]interface{}{"zh-CN": "price-basis"},
+		PriceAmount: decimal.NewFromInt(10), PurchaseType: constants.ProductPurchaseMember,
+		FulfillmentType: constants.FulfillmentTypeUpstream, IsActive: func() *bool { value := true; return &value }(),
+		SKUs: []ProductSKUInput{{ID: sku.ID, SKUCode: sku.SKUCode, PriceAmount: decimal.NewFromInt(10), IsActive: func() *bool { value := true; return &value }()}},
+	})
+	if err != nil {
+		t.Fatalf("update product: %v", err)
+	}
+	if err := db.First(&product, product.ID).Error; err != nil || product.PriceQuantityBasis != 1000 {
+		t.Fatalf("product basis=%d err=%v, want 1000", product.PriceQuantityBasis, err)
+	}
+	if err := db.First(&sku, sku.ID).Error; err != nil || sku.PriceQuantityBasis != 1000 {
+		t.Fatalf("sku basis=%d err=%v, want 1000", sku.PriceQuantityBasis, err)
+	}
+}
+
 func TestApplyAutoStockCounts_LegacyStockPrefersDefaultSKU(t *testing.T) {
 	svc, db := newAutoStockProductService(t)
 	productID := uint(3001)

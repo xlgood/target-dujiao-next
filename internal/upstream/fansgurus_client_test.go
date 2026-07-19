@@ -59,6 +59,9 @@ func TestFansGurusClientListServices(t *testing.T) {
 	if services[0].Service != 16252 || services[0].Rate != "0.30" || services[0].Min != 500 || services[0].Max != 100000 {
 		t.Fatalf("unexpected service: %+v", services[0])
 	}
+	if !strings.Contains(string(services[0].Raw), `"rate":"0.30"`) {
+		t.Fatalf("raw service fields were not preserved: %s", services[0].Raw)
+	}
 }
 
 func TestFansGurusClientAddOrder(t *testing.T) {
