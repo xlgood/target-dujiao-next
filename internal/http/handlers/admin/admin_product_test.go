@@ -120,6 +120,67 @@ func TestBatchUpdateProductStatusReturnsFailureReasons(t *testing.T) {
 	}
 }
 
+func TestQuickUpdateProductRequiresCatalogReview(t *testing.T) {
+	h, db := setupAdminProductHandlerTest(t)
+
+	category := models.Category{
+		Slug:     "catalog-review-category",
+		NameJSON: models.JSON{"zh-CN": "catalog-review-category"},
+		IsActive: true,
+	}
+	if err := db.Create(&category).Error; err != nil {
+		t.Fatalf("create category failed: %v", err)
+	}
+	product := models.Product{
+		CategoryID:      category.ID,
+		Slug:            "pending-provider-catalog-product",
+		TitleJSON:       models.JSON{"zh-CN": "Pending provider catalog product"},
+		PriceAmount:     models.NewMoneyFromDecimal(decimal.NewFromInt(10)),
+		FulfillmentType: constants.FulfillmentTypeUpstream,
+		IsMapped:        true,
+		IsActive:        false,
+	}
+	if err := db.Create(&product).Error; err != nil {
+		t.Fatalf("create product failed: %v", err)
+	}
+	mapping := models.ProductMapping{
+		ConnectionID:        1,
+		LocalProductID:      product.ID,
+		Provider:            "fansgurus",
+		CatalogReviewStatus: models.CatalogReviewPending,
+		IsActive:            true,
+	}
+	if err := db.Create(&mapping).Error; err != nil {
+		t.Fatalf("create product mapping failed: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPatch, "/api/v1/admin/products/1", strings.NewReader(`{"is_active":true}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = req
+	c.Params = gin.Params{{Key: "id", Value: fmt.Sprintf("%d", product.ID)}}
+
+	h.QuickUpdateProduct(c)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected HTTP 200 envelope, got %d body=%s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		StatusCode int    `json:"status_code"`
+		Msg        string `json:"msg"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response failed: %v body=%s", err, w.Body.String())
+	}
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected business status 400, got %d body=%s", resp.StatusCode, w.Body.String())
+	}
+	if resp.Msg != "供应商目录商品需先在“商品映射”中审核后才能上架" {
+		t.Fatalf("unexpected review message: %q", resp.Msg)
+	}
+}
+
 func TestUpdateProductWholesalePricesHandlerUpdatesTiers(t *testing.T) {
 	h, db := setupAdminProductHandlerTest(t)
 

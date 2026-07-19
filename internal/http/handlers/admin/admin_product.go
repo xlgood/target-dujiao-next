@@ -458,6 +458,10 @@ func (h *Handler) QuickUpdateProduct(c *gin.Context) {
 			shared.RespondError(c, response.CodeNotFound, "error.product_not_found", nil)
 			return
 		}
+		if errors.Is(err, service.ErrProductCatalogReviewRequired) {
+			shared.RespondError(c, response.CodeBadRequest, "error.product_catalog_review_required", nil)
+			return
+		}
 		if errors.Is(err, service.ErrProductCategoryInvalid) {
 			shared.RespondError(c, response.CodeBadRequest, "error.product_category_invalid", nil)
 			return
