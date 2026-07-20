@@ -377,17 +377,24 @@ func providerCatalogContent(item upstream.ProviderCatalogItem) models.JSON {
 
 func providerCatalogServiceDescription() models.JSON {
 	return models.JSON{
-		"zh-CN": "结算时请准确填写服务所需资料。",
-		"zh-TW": "結算時請準確填寫服務所需資料。",
-		"en-US": "Please enter the required information accurately at checkout.",
+		"zh-CN": "请填写服务所需资料后提交订单。",
+		"zh-TW": "請填寫服務所需資料後提交訂單。",
+		"en-US": "Enter the required information before submitting your order.",
 	}
 }
 
 func providerCatalogServiceContent(item upstream.ProviderCatalogItem) models.JSON {
+	if item.Provider == upstream.CatalogProviderFansGurus && strings.EqualFold(strings.TrimSpace(item.Type), "custom comments") {
+		return models.JSON{
+			"zh-CN": "<h3>下单说明</h3><p>请填写目标链接，并每行填写一条评论。系统将根据有效评论条数自动计算数量和金额。</p>" + providerCatalogQuantityLine(item, "zh-CN"),
+			"zh-TW": "<h3>下單說明</h3><p>請填寫目標連結，並每行填寫一則評論。系統會依有效評論數量自動計算數量和金額。</p>" + providerCatalogQuantityLine(item, "zh-TW"),
+			"en-US": "<h3>Order information</h3><p>Enter the target link and one comment per line. Quantity and price are calculated from the number of valid comments.</p>" + providerCatalogQuantityLine(item, "en-US"),
+		}
+	}
 	return models.JSON{
-		"zh-CN": "<h3>下单说明</h3><p>订单提交后，可在订单页面查看处理进度和结果。</p><h3>填写要求</h3><p>结算时请按要求填写服务所需资料，并确认链接或账号信息准确无误。</p>" + providerCatalogQuantityLine(item, "zh-CN"),
-		"zh-TW": "<h3>下單說明</h3><p>訂單提交後，可在訂單頁查看處理進度和結果。</p><h3>填寫要求</h3><p>結算時請按要求填寫服務所需資料，並確認連結或帳號資訊準確無誤。</p>" + providerCatalogQuantityLine(item, "zh-TW"),
-		"en-US": "<h3>Order information</h3><p>After placing your order, check the order page for processing progress and results.</p><h3>Required information</h3><p>Enter the required service information at checkout and verify that any link or account information is accurate.</p>" + providerCatalogQuantityLine(item, "en-US"),
+		"zh-CN": "<h3>下单说明</h3><p>请确认链接或账号信息准确无误后提交订单。</p>" + providerCatalogQuantityLine(item, "zh-CN"),
+		"zh-TW": "<h3>下單說明</h3><p>請確認連結或帳號資訊準確無誤後提交訂單。</p>" + providerCatalogQuantityLine(item, "zh-TW"),
+		"en-US": "<h3>Order information</h3><p>Verify that any link or account information is accurate before submitting your order.</p>" + providerCatalogQuantityLine(item, "en-US"),
 	}
 }
 
@@ -526,7 +533,7 @@ func providerManualFormSchema(provider string) models.JSON {
 	if provider == upstream.CatalogProviderFansGurus {
 		return models.JSON{
 			"fields": []map[string]interface{}{
-				{"key": "link", "type": "url", "label": "Target URL", "required": true},
+				{"key": "link", "type": "url", "label": localizedFormLabel("目标链接", "目標連結", "Target URL"), "required": true},
 			},
 		}
 	}
@@ -541,8 +548,8 @@ func providerCatalogManualFormSchema(item upstream.ProviderCatalogItem) models.J
 		switch strings.ToLower(strings.TrimSpace(item.Type)) {
 		case "custom comments":
 			return models.JSON{"fields": []map[string]interface{}{
-				{"key": "link", "type": "url", "label": "Target URL", "required": true},
-				{"key": "comments", "type": "textarea", "label": "Comments", "required": true},
+				{"key": "link", "type": "url", "label": localizedFormLabel("目标链接", "目標連結", "Target URL"), "required": true},
+				{"key": "comments", "type": "textarea", "label": localizedFormLabel("评论内容（每行一条）", "評論內容（每行一則）", "Comments (one per line)"), "placeholder": localizedFormLabel("每行填写一条评论", "每行填寫一則評論", "One comment per line"), "required": true},
 			}}
 		case "poll":
 			return models.JSON{"fields": []map[string]interface{}{
@@ -573,6 +580,10 @@ func providerCatalogManualFormSchema(item upstream.ProviderCatalogItem) models.J
 		}
 	}
 	return providerManualFormSchema(item.Provider)
+}
+
+func localizedFormLabel(zhCN, zhTW, enUS string) models.JSON {
+	return models.JSON{"zh-CN": zhCN, "zh-TW": zhTW, "en-US": enUS}
 }
 
 func providerVariantSpecValues(_ string, _ string, variant upstream.ProviderCatalogVariant) models.JSON {
