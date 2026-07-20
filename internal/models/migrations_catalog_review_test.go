@@ -152,3 +152,48 @@ func TestProviderCatalogCustomerCopyMigrationRemovesInternalWordingWithoutChangi
 		t.Fatalf("internal wording remains: description=%v content=%v", product.DescriptionJSON, product.ContentJSON)
 	}
 }
+
+func TestTGXCatalogCustomerCopyMigrationReplacesSourceCopyWithoutChangingPublication(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:tgx_catalog_customer_copy?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AutoMigrate(&Product{}, &ProductMapping{}, &Setting{}); err != nil {
+		t.Fatal(err)
+	}
+	previousDB := DB
+	DB = db
+	t.Cleanup(func() { DB = previousDB })
+
+	product := Product{
+		Slug:            "published-tgx-source-copy",
+		TitleJSON:       JSON{"zh-CN": "TGX item"},
+		DescriptionJSON: JSON{"zh-CN": "联系平台商家：https://source.example/help"},
+		ContentJSON:     JSON{"zh-CN": "<p>请联系平台商家处理</p>"},
+		IsActive:        true,
+	}
+	if err := db.Create(&product).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&ProductMapping{ConnectionID: 1, LocalProductID: product.ID, Provider: "tgx"}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	if err := ensureTGXCatalogCustomerCopyMigration(); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.First(&product, product.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if !product.IsActive {
+		t.Fatal("TGX customer-copy migration changed product publication state")
+	}
+	for _, content := range []JSON{product.DescriptionJSON, product.ContentJSON} {
+		for _, value := range content {
+			text, _ := value.(string)
+			if strings.Contains(text, "平台商家") || strings.Contains(text, "source.example") {
+				t.Fatalf("source copy remains: %v", content)
+			}
+		}
+	}
+}

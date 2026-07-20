@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/dujiao-next/internal/constants"
-	"github.com/dujiao-next/internal/htmltext"
 	"github.com/dujiao-next/internal/models"
 	"github.com/dujiao-next/internal/repository"
 	"github.com/dujiao-next/internal/upstream"
@@ -363,20 +362,14 @@ func providerCatalogImages(item upstream.ProviderCatalogItem, platform string) [
 }
 
 func providerCatalogDescription(item upstream.ProviderCatalogItem) models.JSON {
-	if item.Provider == upstream.CatalogProviderTGX {
-		return localizedText(htmltext.StripToPlainText(item.Description))
-	}
-	if item.Provider == upstream.CatalogProviderFansGurus {
+	if item.Provider == upstream.CatalogProviderTGX || item.Provider == upstream.CatalogProviderFansGurus {
 		return providerCatalogServiceDescription()
 	}
 	return localizedText(item.Description)
 }
 
 func providerCatalogContent(item upstream.ProviderCatalogItem) models.JSON {
-	if item.Provider == upstream.CatalogProviderTGX {
-		return localizedText(strings.TrimSpace(item.Description))
-	}
-	if item.Provider == upstream.CatalogProviderFansGurus {
+	if item.Provider == upstream.CatalogProviderTGX || item.Provider == upstream.CatalogProviderFansGurus {
 		return providerCatalogServiceContent(item)
 	}
 	return localizedText(item.Description)

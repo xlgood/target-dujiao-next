@@ -1,6 +1,7 @@
 package service
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/dujiao-next/internal/constants"
@@ -167,6 +168,45 @@ func TestImportProviderCatalogKeepsTGXCover(t *testing.T) {
 	}
 	if len(product.Images) != 1 || product.Images[0] != "https://upstream.example/cover.jpg" {
 		t.Fatalf("images=%v, want TGX cover", product.Images)
+	}
+}
+
+func TestImportProviderCatalogDoesNotPublishTGXSourceDescription(t *testing.T) {
+	db := setupProviderCatalogImportDB(t)
+	svc := NewProductMappingService(
+		repository.NewProductMappingRepository(db),
+		repository.NewSKUMappingRepository(db),
+		repository.NewProductRepository(db),
+		repository.NewProductSKURepository(db),
+		repository.NewCategoryRepository(db),
+		nil,
+	)
+
+	catalog := upstream.FilteredCatalog{TGX: []upstream.ProviderCatalogItem{{
+		Provider:      upstream.CatalogProviderTGX,
+		Code:          "IG-COPY-001",
+		Name:          "Instagram account",
+		Category:      "Instagram",
+		Description:   "Contact the platform merchant at https://source.example/help",
+		UpstreamPrice: "100.00",
+		TargetPrice:   "100.00",
+		Active:        true,
+	}}}
+	if _, err := svc.ImportProviderCatalog(10, catalog); err != nil {
+		t.Fatalf("import catalog: %v", err)
+	}
+
+	var product models.Product
+	if err := db.Where("slug LIKE ?", "catalog-instagram-%").First(&product).Error; err != nil {
+		t.Fatalf("load product: %v", err)
+	}
+	for _, content := range []models.JSON{product.DescriptionJSON, product.ContentJSON} {
+		for _, value := range content {
+			text, _ := value.(string)
+			if strings.Contains(text, "platform merchant") || strings.Contains(text, "source.example") {
+				t.Fatalf("source description leaked into customer copy: %v", content)
+			}
+		}
 	}
 }
 

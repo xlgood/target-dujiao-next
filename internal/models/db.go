@@ -26,6 +26,7 @@ const (
 	tgxUnknownStockMigrationSettingKey              = "migration/tgx_unknown_stock_v1"
 	providerCatalogContentMigrationSettingKey       = "migration/provider_catalog_content_v1"
 	providerCatalogCustomerCopyMigrationSettingKey  = "migration/provider_catalog_customer_copy_v2"
+	tgxCatalogCustomerCopyMigrationSettingKey       = "migration/tgx_catalog_customer_copy_v1"
 	catalogReviewMigrationSettingKey                = "migration/provider_catalog_review_v1"
 	catalogReviewCorrectionMigrationSettingKey      = "migration/provider_catalog_review_v2"
 	manualStockUnlimitedValue                       = -1
@@ -209,6 +210,9 @@ func AutoMigrate() error {
 		return err
 	}
 	if err := ensureProviderCatalogCustomerCopyMigration(); err != nil {
+		return err
+	}
+	if err := ensureTGXCatalogCustomerCopyMigration(); err != nil {
 		return err
 	}
 	if err := ensureProviderCatalogImageMigration(); err != nil {

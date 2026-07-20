@@ -206,6 +206,39 @@ func ensureProviderCatalogCustomerCopyMigration() error {
 	})
 }
 
+// ensureTGXCatalogCustomerCopyMigration replaces source descriptions that
+// were previously copied into customer pages. Titles, pricing, form schemas,
+// stock, and publication state are deliberately left unchanged.
+func ensureTGXCatalogCustomerCopyMigration() error {
+	if DB == nil {
+		return errors.New("database is not initialized")
+	}
+	var marker Setting
+	if err := DB.First(&marker, "key = ?", tgxCatalogCustomerCopyMigrationSettingKey).Error; err == nil && migrationDone(marker.ValueJSON) {
+		return nil
+	} else if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		return err
+	}
+
+	return DB.Transaction(func(tx *gorm.DB) error {
+		mappedProductIDs := tx.Model(&ProductMapping{}).
+			Select("local_product_id").
+			Where("provider = ? AND deleted_at IS NULL", "tgx")
+		if err := tx.Model(&Product{}).
+			Where("id IN (?) AND deleted_at IS NULL", mappedProductIDs).
+			Updates(map[string]interface{}{
+				"description_json": providerCatalogBaselineDescription(),
+				"content_json":     providerCatalogBaselineContent(),
+			}).Error; err != nil {
+			return err
+		}
+		return tx.Save(&Setting{
+			Key:       tgxCatalogCustomerCopyMigrationSettingKey,
+			ValueJSON: JSON{"done": true, "migrated_at": time.Now().UTC().Format(time.RFC3339)},
+		}).Error
+	})
+}
+
 func sanitizeProviderCatalogCustomerCopy(content JSON) (JSON, bool) {
 	if len(content) == 0 {
 		return content, false
