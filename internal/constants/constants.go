@@ -337,6 +337,7 @@ const (
 const (
 	QueueDefault                    = "default"
 	QueueInventory                  = "inventory"
+	QueueCatalogContent             = "catalog-content"
 	TaskOrderStatusEmail            = "order:status_email"
 	TaskOrderAutoFulfill            = "order:auto_fulfill"
 	TaskOrderTimeoutCancel          = "order:timeout_cancel"
@@ -349,6 +350,7 @@ const (
 	TaskProcurementSyncAccepted     = "procurement:sync_accepted"
 	TaskUpstreamSyncProducts        = "upstream:sync_products"
 	TaskUpstreamSyncStock           = "upstream:sync_stock"
+	TaskProviderCatalogContentSync  = "provider_catalog:sync_content"
 	TaskProviderBalanceCheck        = "provider:balance_check"
 	TaskReconciliationRun           = "reconciliation:run"
 	TaskDownstreamCallback          = "downstream:callback"

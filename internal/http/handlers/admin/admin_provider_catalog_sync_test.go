@@ -13,6 +13,7 @@ import (
 	"github.com/dujiao-next/internal/constants"
 	"github.com/dujiao-next/internal/models"
 	"github.com/dujiao-next/internal/provider"
+	"github.com/dujiao-next/internal/queue"
 	"github.com/dujiao-next/internal/repository"
 	"github.com/dujiao-next/internal/service"
 	"github.com/dujiao-next/internal/upstream"
@@ -266,4 +267,105 @@ func TestSyncProviderCatalogRejectsWrongConnectionProtocol(t *testing.T) {
 		t.Fatalf("expected business error for wrong protocol")
 	}
 	_ = fansConnID
+}
+
+func TestSyncProviderCatalogContentEnqueuesMetadataOnlyTask(t *testing.T) {
+	h, _, fansConnID, tgxConnID := setupAdminProviderCatalogSyncHandlerTest(t)
+	var got queue.ProviderCatalogContentSyncPayload
+	calls := 0
+	h.ProviderCatalogContentEnqueue = func(payload queue.ProviderCatalogContentSyncPayload) error {
+		calls++
+		got = payload
+		return nil
+	}
+
+	body := fmt.Sprintf(`{"fansgurus_connection_id":%d,"tgx_connection_id":%d}`, fansConnID, tgxConnID)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/provider-catalog/content/sync", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = req
+
+	h.SyncProviderCatalogContent(c)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", w.Code, w.Body.String())
+	}
+	if calls != 1 || got.FansGurusConnectionID != fansConnID || got.TGXConnectionID != tgxConnID {
+		t.Fatalf("enqueue calls=%d payload=%+v", calls, got)
+	}
+	var resp struct {
+		StatusCode int `json:"status_code"`
+		Data       struct {
+			Status string `json:"status"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.StatusCode != 0 || resp.Data.Status != "queued" {
+		t.Fatalf("unexpected response: %+v", resp)
+	}
+}
+
+func TestSyncProviderCatalogContentReportsQueueDisabled(t *testing.T) {
+	h, _, fansConnID, tgxConnID := setupAdminProviderCatalogSyncHandlerTest(t)
+	body := fmt.Sprintf(`{"fansgurus_connection_id":%d,"tgx_connection_id":%d}`, fansConnID, tgxConnID)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/provider-catalog/content/sync", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = req
+
+	h.SyncProviderCatalogContent(c)
+
+	var resp struct {
+		StatusCode int `json:"status_code"`
+		Data       struct {
+			Status string `json:"status"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.StatusCode != 0 || resp.Data.Status != "queue_disabled" {
+		t.Fatalf("unexpected response: %+v", resp)
+	}
+}
+
+func TestSyncProviderCatalogContentRejectsWrongConnectionProtocol(t *testing.T) {
+	h, _, _, tgxConnID := setupAdminProviderCatalogSyncHandlerTest(t)
+	wrong, err := h.SiteConnectionService.Create(service.CreateConnectionInput{
+		Name:      "wrong",
+		BaseURL:   "https://wrong.example",
+		ApiKey:    "key",
+		ApiSecret: "secret",
+		Protocol:  constants.ConnectionProtocolDujiaoNext,
+	})
+	if err != nil {
+		t.Fatalf("create wrong connection failed: %v", err)
+	}
+	h.ProviderCatalogContentEnqueue = func(queue.ProviderCatalogContentSyncPayload) error {
+		t.Fatal("enqueue should not be called for invalid protocol")
+		return nil
+	}
+
+	body := fmt.Sprintf(`{"fansgurus_connection_id":%d,"tgx_connection_id":%d}`, wrong.ID, tgxConnID)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/provider-catalog/content/sync", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = req
+
+	h.SyncProviderCatalogContent(c)
+
+	var resp struct {
+		StatusCode int `json:"status_code"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.StatusCode == 0 {
+		t.Fatalf("expected business error for wrong protocol")
+	}
 }

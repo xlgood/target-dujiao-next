@@ -8,6 +8,7 @@ import (
 	"github.com/dujiao-next/internal/http/response"
 	"github.com/dujiao-next/internal/logger"
 	"github.com/dujiao-next/internal/models"
+	"github.com/dujiao-next/internal/queue"
 	"github.com/dujiao-next/internal/service"
 	"github.com/dujiao-next/internal/upstream"
 
@@ -94,6 +95,43 @@ func (h *Handler) SyncProviderCatalog(c *gin.Context) {
 	}
 
 	response.Success(c, result)
+}
+
+// SyncProviderCatalogContent refreshes safe storefront descriptions only.
+// It deliberately leaves prices, stock, forms, reviews, and publication state
+// untouched, so it can run independently from the catalog sync.
+func (h *Handler) SyncProviderCatalogContent(c *gin.Context) {
+	var req syncProviderCatalogRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		shared.RespondBindError(c, err)
+		return
+	}
+	fansConn, ok := h.loadProviderCatalogConnection(c, req.FansGurusConnectionID, constants.ConnectionProtocolFansGurus)
+	if !ok {
+		return
+	}
+	tgxConn, ok := h.loadProviderCatalogConnection(c, req.TGXConnectionID, constants.ConnectionProtocolTGXAccount)
+	if !ok {
+		return
+	}
+	payload := queue.ProviderCatalogContentSyncPayload{FansGurusConnectionID: fansConn.ID, TGXConnectionID: tgxConn.ID}
+	if h.ProviderCatalogContentEnqueue != nil {
+		if err := h.ProviderCatalogContentEnqueue(payload); err != nil {
+			shared.RespondError(c, response.CodeInternal, "error.bad_request", err)
+			return
+		}
+		response.Success(c, gin.H{"status": "queued"})
+		return
+	}
+	if h.QueueClient != nil && h.QueueClient.Enabled() {
+		if err := h.QueueClient.EnqueueProviderCatalogContentSync(payload); err != nil {
+			shared.RespondError(c, response.CodeInternal, "error.bad_request", err)
+			return
+		}
+		response.Success(c, gin.H{"status": "queued"})
+		return
+	}
+	response.Success(c, gin.H{"status": "queue_disabled"})
 }
 
 func (h *Handler) loadProviderCatalogConnection(c *gin.Context, id uint, protocol string) (*models.SiteConnection, bool) {

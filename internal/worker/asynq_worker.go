@@ -51,6 +51,7 @@ func (c *Consumer) Register(mux *asynq.ServeMux) {
 	mux.HandleFunc(queue.TaskAffiliateConfirmCommissions, withPanicRecovery(queue.TaskAffiliateConfirmCommissions, c.handleAffiliateConfirmCommissions))
 	mux.HandleFunc(queue.TaskResellerConfirmLedger, withPanicRecovery(queue.TaskResellerConfirmLedger, c.handleResellerConfirmLedger))
 	mux.HandleFunc(queue.TaskUpstreamSyncStock, withPanicRecovery(queue.TaskUpstreamSyncStock, c.handleUpstreamSyncStock))
+	mux.HandleFunc(queue.TaskProviderCatalogContentSync, withPanicRecovery(queue.TaskProviderCatalogContentSync, c.handleProviderCatalogContentSync))
 	mux.HandleFunc(queue.TaskProviderBalanceCheck, withPanicRecovery(queue.TaskProviderBalanceCheck, c.handleProviderBalanceCheck))
 	mux.HandleFunc(queue.TaskProcurementSubmit, withPanicRecovery(queue.TaskProcurementSubmit, c.handleProcurementSubmit))
 	mux.HandleFunc(queue.TaskProcurementPollStatus, withPanicRecovery(queue.TaskProcurementPollStatus, c.handleProcurementPollStatus))
@@ -423,6 +424,40 @@ func (c *Consumer) handleUpstreamSyncStock(_ context.Context, _ *asynq.Task) err
 		return err
 	}
 	return nil
+}
+
+func (c *Consumer) handleProviderCatalogContentSync(ctx context.Context, task *asynq.Task) error {
+	if c == nil || c.ProductMappingService == nil || c.SiteConnectionService == nil || task == nil {
+		return nil
+	}
+	var payload queue.ProviderCatalogContentSyncPayload
+	if err := json.Unmarshal(task.Payload(), &payload); err != nil {
+		return err
+	}
+	fansConn, err := c.SiteConnectionService.GetByID(payload.FansGurusConnectionID)
+	if err != nil || fansConn == nil {
+		if err == nil {
+			err = fmt.Errorf("fansgurus connection not found")
+		}
+		return err
+	}
+	tgxConn, err := c.SiteConnectionService.GetByID(payload.TGXConnectionID)
+	if err != nil || tgxConn == nil {
+		if err == nil {
+			err = fmt.Errorf("tgx connection not found")
+		}
+		return err
+	}
+	tgxSecret, err := c.SiteConnectionService.DecryptSecret(tgxConn.ApiSecret)
+	if err != nil {
+		return err
+	}
+	_, err = c.ProductMappingService.SyncProviderCatalogContentWithClients(ctx,
+		service.ProviderCatalogContentSyncInput{FansGurusConnectionID: fansConn.ID, TGXConnectionID: tgxConn.ID},
+		upstream.NewFansGurusClient(fansConn.BaseURL, fansConn.ApiKey),
+		upstream.NewTGXClient(tgxConn.BaseURL, tgxConn.ApiKey, tgxSecret),
+	)
+	return err
 }
 
 func (c *Consumer) handleProviderBalanceCheck(_ context.Context, _ *asynq.Task) error {

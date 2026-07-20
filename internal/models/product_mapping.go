@@ -20,22 +20,29 @@ const (
 
 // ProductMapping 商品映射表
 type ProductMapping struct {
-	ID                      uint           `gorm:"primarykey" json:"id"`
-	ConnectionID            uint           `gorm:"index;not null" json:"connection_id"`
-	LocalProductID          uint           `gorm:"uniqueIndex;not null" json:"local_product_id"`
-	UpstreamProductID       uint           `gorm:"not null" json:"upstream_product_id"`
-	UpstreamProductCode     string         `gorm:"type:varchar(128);index" json:"upstream_product_code"`
-	Provider                string         `gorm:"type:varchar(32);index" json:"provider"`
-	Platform                string         `gorm:"type:varchar(32);index" json:"platform"`
-	PlatformLocked          bool           `gorm:"not null;default:false" json:"platform_locked"`
-	CatalogReviewStatus     string         `gorm:"type:varchar(16);not null;default:'pending';index" json:"catalog_review_status"`
-	UpstreamFulfillmentType string         `gorm:"type:varchar(20);not null;default:'manual'" json:"upstream_fulfillment_type"` // 上游原始交付类型（auto/manual）
-	UpstreamStatus          string         `gorm:"type:varchar(16);not null;default:'active';index" json:"upstream_status"`     // 上游商品状态：active/inactive/deleted
-	IsActive                bool           `gorm:"not null;default:true" json:"is_active"`
-	LastSyncedAt            *time.Time     `json:"last_synced_at,omitempty"`
-	CreatedAt               time.Time      `gorm:"index" json:"created_at"`
-	UpdatedAt               time.Time      `gorm:"index" json:"updated_at"`
-	DeletedAt               gorm.DeletedAt `gorm:"index" json:"-"`
+	ID                  uint   `gorm:"primarykey" json:"id"`
+	ConnectionID        uint   `gorm:"index;not null" json:"connection_id"`
+	LocalProductID      uint   `gorm:"uniqueIndex;not null" json:"local_product_id"`
+	UpstreamProductID   uint   `gorm:"not null" json:"upstream_product_id"`
+	UpstreamProductCode string `gorm:"type:varchar(128);index" json:"upstream_product_code"`
+	Provider            string `gorm:"type:varchar(32);index" json:"provider"`
+	Platform            string `gorm:"type:varchar(32);index" json:"platform"`
+	PlatformLocked      bool   `gorm:"not null;default:false" json:"platform_locked"`
+	CatalogReviewStatus string `gorm:"type:varchar(16);not null;default:'pending';index" json:"catalog_review_status"`
+	// CatalogSource* is an admin-only evidence snapshot. Customer pages read the
+	// sanitized Product fields, never these unmodified source values.
+	CatalogSourceCategory    string         `gorm:"type:text" json:"catalog_source_category,omitempty"`
+	CatalogSourceDescription string         `gorm:"type:text" json:"catalog_source_description,omitempty"`
+	CatalogSourceAverageTime string         `gorm:"type:varchar(255)" json:"catalog_source_average_time,omitempty"`
+	CatalogSourceHash        string         `gorm:"type:char(64);index" json:"catalog_source_hash,omitempty"`
+	CatalogSourceSyncedAt    *time.Time     `json:"catalog_source_synced_at,omitempty"`
+	UpstreamFulfillmentType  string         `gorm:"type:varchar(20);not null;default:'manual'" json:"upstream_fulfillment_type"` // 上游原始交付类型（auto/manual）
+	UpstreamStatus           string         `gorm:"type:varchar(16);not null;default:'active';index" json:"upstream_status"`     // 上游商品状态：active/inactive/deleted
+	IsActive                 bool           `gorm:"not null;default:true" json:"is_active"`
+	LastSyncedAt             *time.Time     `json:"last_synced_at,omitempty"`
+	CreatedAt                time.Time      `gorm:"index" json:"created_at"`
+	UpdatedAt                time.Time      `gorm:"index" json:"updated_at"`
+	DeletedAt                gorm.DeletedAt `gorm:"index" json:"-"`
 
 	Connection *SiteConnection `gorm:"foreignKey:ConnectionID" json:"connection,omitempty"`
 	Product    *Product        `gorm:"foreignKey:LocalProductID" json:"product,omitempty"`

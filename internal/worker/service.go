@@ -75,6 +75,25 @@ func NewInventoryService(cfg *config.QueueConfig, consumer *Consumer) (*Service,
 	return &Service{name: "inventory-worker", server: server, mux: mux, scheduler: scheduler, consumer: consumer}, nil
 }
 
+// NewCatalogContentService consumes only customer-facing catalog metadata
+// updates. Unlike the inventory worker, it does not seed or schedule stock
+// refreshes and it never registers procurement handlers.
+func NewCatalogContentService(cfg *config.QueueConfig, consumer *Consumer) (*Service, error) {
+	if cfg == nil || !cfg.Enabled {
+		return nil, errors.New("queue disabled")
+	}
+	if consumer == nil || consumer.ProductMappingService == nil {
+		return nil, errors.New("catalog content consumer is not initialized")
+	}
+	opt, serverCfg := queue.BuildServerConfig(cfg)
+	serverCfg.Concurrency = 1
+	serverCfg.Queues = map[string]int{constants.QueueCatalogContent: 1}
+	server := asynq.NewServer(opt, serverCfg)
+	mux := asynq.NewServeMux()
+	mux.HandleFunc(queue.TaskProviderCatalogContentSync, withPanicRecovery(queue.TaskProviderCatalogContentSync, consumer.handleProviderCatalogContentSync))
+	return &Service{name: "catalog-content-worker", server: server, mux: mux, consumer: consumer}, nil
+}
+
 func registerInventoryPeriodicTask(scheduler *asynq.Scheduler, consumer *Consumer, cfg *config.QueueConfig) {
 	if scheduler == nil || consumer == nil || consumer.ProductMappingService == nil {
 		return

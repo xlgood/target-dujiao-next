@@ -542,6 +542,8 @@ func SetupRouter(cfg *config.Config, c *provider.Container) *gin.Engine {
 				// Provider 商品目录同步
 				authorized.POST("/provider-catalog/sync", adminHandler.SyncProviderCatalog)
 				authorized.GET("/provider-catalog/sync-runs", adminHandler.ListProviderCatalogSyncRuns)
+				authorized.POST("/provider-catalog/content/sync", adminHandler.SyncProviderCatalogContent)
+				authorized.GET("/provider-catalog/content/sync-runs", adminHandler.ListProviderCatalogContentSyncRuns)
 				authorized.GET("/provider-catalog/sync-runs/:id/filter-reasons.csv", adminHandler.ExportProviderCatalogFilterReasons)
 
 				// 商品映射管理

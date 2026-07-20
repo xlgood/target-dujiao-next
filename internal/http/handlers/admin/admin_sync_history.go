@@ -84,6 +84,18 @@ func (h *Handler) ListProviderCatalogSyncRuns(c *gin.Context) {
 	response.SuccessWithPage(c, runs, response.BuildPagination(page, pageSize, total))
 }
 
+func (h *Handler) ListProviderCatalogContentSyncRuns(c *gin.Context) {
+	page, pageSize := shared.ParsePagination(c)
+	runs, total, err := h.ProductMappingService.ListProviderCatalogContentSyncRuns(repository.ProviderCatalogContentSyncRunListFilter{
+		Status: strings.TrimSpace(c.Query("status")), Pagination: repository.Pagination{Page: page, PageSize: pageSize},
+	})
+	if err != nil {
+		shared.RespondError(c, response.CodeInternal, "error.mapping_fetch_failed", err)
+		return
+	}
+	response.SuccessWithPage(c, runs, response.BuildPagination(page, pageSize, total))
+}
+
 func (h *Handler) ExportProviderCatalogFilterReasons(c *gin.Context) {
 	id, err := shared.ParseParamUint(c, "id")
 	if err != nil {

@@ -121,7 +121,7 @@ func (s *ProductMappingService) importProviderCatalogItemInTx(tx *gorm.DB, conne
 	product := models.Product{
 		CategoryID:           category.ID,
 		Slug:                 slug,
-		TitleJSON:            localizedText(item.Name),
+		TitleJSON:            localizedText(providerCatalogDisplayTitle(item.Name)),
 		DescriptionJSON:      providerCatalogDescription(item),
 		ContentJSON:          providerCatalogContent(item),
 		SeoMetaJSON:          models.JSON{},
@@ -215,9 +215,11 @@ func (s *ProductMappingService) refreshProviderCatalogItemInTx(tx *gorm.DB, mapp
 		return err
 	}
 	product.Slug = slug
-	product.TitleJSON = localizedText(item.Name)
-	product.DescriptionJSON = providerCatalogDescription(item)
-	product.ContentJSON = providerCatalogContent(item)
+	product.TitleJSON = localizedText(providerCatalogDisplayTitle(item.Name))
+	if strings.TrimSpace(mapping.CatalogSourceHash) == "" {
+		product.DescriptionJSON = providerCatalogDescription(item)
+		product.ContentJSON = providerCatalogContent(item)
+	}
 	if conn == nil || conn.AutoSyncPrice {
 		product.PriceAmount = models.NewMoneyFromDecimal(price)
 	}

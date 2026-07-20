@@ -143,6 +143,19 @@ func (c *Client) EnqueueUpstreamSyncStock(opts ...asynq.Option) error {
 	return err
 }
 
+func (c *Client) EnqueueProviderCatalogContentSync(payload ProviderCatalogContentSyncPayload, opts ...asynq.Option) error {
+	if !c.Enabled() {
+		return nil
+	}
+	task, err := NewProviderCatalogContentSyncTask(payload)
+	if err != nil {
+		return err
+	}
+	options := append([]asynq.Option{asynq.Queue(constants.QueueCatalogContent), asynq.MaxRetry(1)}, opts...)
+	_, err = c.client.Enqueue(task, options...)
+	return err
+}
+
 // EnqueueProcurementSubmit 推送采购提交任务
 func (c *Client) EnqueueProcurementSubmit(payload ProcurementSubmitPayload, opts ...asynq.Option) error {
 	if !c.Enabled() {

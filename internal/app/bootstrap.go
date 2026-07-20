@@ -46,6 +46,15 @@ func BuildRunner(cfg *config.Config, mode string) (*Runner, error) {
 		services = append(services, inventoryService)
 	}
 
+	if mode == ModeCatalogContentWorker {
+		consumer := worker.NewConsumer(container)
+		catalogContentService, err := worker.NewCatalogContentService(&cfg.Queue, consumer)
+		if err != nil {
+			return nil, err
+		}
+		services = append(services, catalogContentService)
+	}
+
 	// 如果没有服务被启动（例如模式错误或配置导致都没起），应该报错或至少打日志
 	if len(services) == 0 {
 		return nil, errors.New("no services initialized (check mode and config)")

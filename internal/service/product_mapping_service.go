@@ -33,20 +33,21 @@ var (
 
 // ProductMappingService 商品映射业务服务
 type ProductMappingService struct {
-	mappingRepo     repository.ProductMappingRepository
-	skuMappingRepo  repository.SKUMappingRepository
-	productRepo     repository.ProductRepository
-	productSKURepo  repository.ProductSKURepository
-	categoryRepo    repository.CategoryRepository
-	connService     *SiteConnectionService
-	categoryService *CategoryService
-	mediaService    *MediaService
-	settingService  *SettingService
-	syncRunRepo     repository.ProviderCatalogSyncRunRepository
-	tgxSyncRunRepo  repository.TGXInventorySyncRunRepository
-	notificationSvc *NotificationService
-	tgxAlertMu      sync.Mutex
-	tgxAlertUntil   map[uint]time.Time
+	mappingRepo        repository.ProductMappingRepository
+	skuMappingRepo     repository.SKUMappingRepository
+	productRepo        repository.ProductRepository
+	productSKURepo     repository.ProductSKURepository
+	categoryRepo       repository.CategoryRepository
+	connService        *SiteConnectionService
+	categoryService    *CategoryService
+	mediaService       *MediaService
+	settingService     *SettingService
+	syncRunRepo        repository.ProviderCatalogSyncRunRepository
+	contentSyncRunRepo repository.ProviderCatalogContentSyncRunRepository
+	tgxSyncRunRepo     repository.TGXInventorySyncRunRepository
+	notificationSvc    *NotificationService
+	tgxAlertMu         sync.Mutex
+	tgxAlertUntil      map[uint]time.Time
 }
 
 // NewProductMappingService 创建商品映射服务

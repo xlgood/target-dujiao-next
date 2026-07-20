@@ -19,55 +19,56 @@ type Container struct {
 	QueueClient *queue.Client
 
 	// Repositories
-	AdminRepo                   repository.AdminRepository
-	UserRepo                    repository.UserRepository
-	UserOAuthIdentityRepo       repository.UserOAuthIdentityRepository
-	EmailVerifyCodeRepo         repository.EmailVerifyCodeRepository
-	OrderRepo                   repository.OrderRepository
-	PaymentRepo                 repository.PaymentRepository
-	PaymentChannelRepo          repository.PaymentChannelRepository
-	CardSecretRepo              repository.CardSecretRepository
-	CardSecretBatchRepo         repository.CardSecretBatchRepository
-	GiftCardRepo                repository.GiftCardRepository
-	FulfillmentRepo             repository.FulfillmentRepository
-	ProductRepo                 repository.ProductRepository
-	ProductSKURepo              repository.ProductSKURepository
-	CartRepo                    repository.CartRepository
-	CouponRepo                  repository.CouponRepository
-	CouponUsageRepo             repository.CouponUsageRepository
-	PromotionRepo               repository.PromotionRepository
-	WalletRepo                  repository.WalletRepository
-	OrderRefundRecordRepo       repository.OrderRefundRecordRepository
-	PostRepo                    repository.PostRepository
-	CategoryRepo                repository.CategoryRepository
-	BannerRepo                  repository.BannerRepository
-	SettingRepo                 repository.SettingRepository
-	UserLoginLogRepo            repository.UserLoginLogRepository
-	AuthzAuditLogRepo           repository.AuthzAuditLogRepository
-	NotificationLogRepo         repository.NotificationLogRepository
-	AdminLoginLogRepo           repository.AdminLoginLogRepository
-	DashboardRepo               repository.DashboardRepository
-	AffiliateRepo               repository.AffiliateRepository
-	ResellerRepo                repository.ResellerRepository
-	ResellerProductSettingRepo  repository.ResellerProductSettingRepository
-	ResellerOperationsRepo      repository.ResellerOperationsRepository
-	ApiCredentialRepo           repository.ApiCredentialRepository
-	SiteConnectionRepo          repository.SiteConnectionRepository
-	ProductMappingRepo          repository.ProductMappingRepository
-	SKUMappingRepo              repository.SKUMappingRepository
-	ProviderCatalogSyncRunRepo  repository.ProviderCatalogSyncRunRepository
-	TGXInventorySyncRunRepo     repository.TGXInventorySyncRunRepository
-	ProviderBalanceSnapshotRepo repository.ProviderBalanceSnapshotRepository
-	ProcurementOrderRepo        repository.ProcurementOrderRepository
-	DownstreamOrderRefRepo      repository.DownstreamOrderRefRepository
-	ReconciliationJobRepo       repository.ReconciliationJobRepository
-	ReconciliationItemRepo      repository.ReconciliationItemRepository
-	ChannelClientRepo           repository.ChannelClientRepository
-	TelegramBroadcastRepo       repository.TelegramBroadcastRepository
-	MemberLevelRepo             repository.MemberLevelRepository
-	MemberLevelPriceRepo        repository.MemberLevelPriceRepository
-	MediaRepo                   repository.MediaRepository
-	PostCategoryRepo            repository.PostCategoryRepository
+	AdminRepo                         repository.AdminRepository
+	UserRepo                          repository.UserRepository
+	UserOAuthIdentityRepo             repository.UserOAuthIdentityRepository
+	EmailVerifyCodeRepo               repository.EmailVerifyCodeRepository
+	OrderRepo                         repository.OrderRepository
+	PaymentRepo                       repository.PaymentRepository
+	PaymentChannelRepo                repository.PaymentChannelRepository
+	CardSecretRepo                    repository.CardSecretRepository
+	CardSecretBatchRepo               repository.CardSecretBatchRepository
+	GiftCardRepo                      repository.GiftCardRepository
+	FulfillmentRepo                   repository.FulfillmentRepository
+	ProductRepo                       repository.ProductRepository
+	ProductSKURepo                    repository.ProductSKURepository
+	CartRepo                          repository.CartRepository
+	CouponRepo                        repository.CouponRepository
+	CouponUsageRepo                   repository.CouponUsageRepository
+	PromotionRepo                     repository.PromotionRepository
+	WalletRepo                        repository.WalletRepository
+	OrderRefundRecordRepo             repository.OrderRefundRecordRepository
+	PostRepo                          repository.PostRepository
+	CategoryRepo                      repository.CategoryRepository
+	BannerRepo                        repository.BannerRepository
+	SettingRepo                       repository.SettingRepository
+	UserLoginLogRepo                  repository.UserLoginLogRepository
+	AuthzAuditLogRepo                 repository.AuthzAuditLogRepository
+	NotificationLogRepo               repository.NotificationLogRepository
+	AdminLoginLogRepo                 repository.AdminLoginLogRepository
+	DashboardRepo                     repository.DashboardRepository
+	AffiliateRepo                     repository.AffiliateRepository
+	ResellerRepo                      repository.ResellerRepository
+	ResellerProductSettingRepo        repository.ResellerProductSettingRepository
+	ResellerOperationsRepo            repository.ResellerOperationsRepository
+	ApiCredentialRepo                 repository.ApiCredentialRepository
+	SiteConnectionRepo                repository.SiteConnectionRepository
+	ProductMappingRepo                repository.ProductMappingRepository
+	SKUMappingRepo                    repository.SKUMappingRepository
+	ProviderCatalogSyncRunRepo        repository.ProviderCatalogSyncRunRepository
+	ProviderCatalogContentSyncRunRepo repository.ProviderCatalogContentSyncRunRepository
+	TGXInventorySyncRunRepo           repository.TGXInventorySyncRunRepository
+	ProviderBalanceSnapshotRepo       repository.ProviderBalanceSnapshotRepository
+	ProcurementOrderRepo              repository.ProcurementOrderRepository
+	DownstreamOrderRefRepo            repository.DownstreamOrderRefRepository
+	ReconciliationJobRepo             repository.ReconciliationJobRepository
+	ReconciliationItemRepo            repository.ReconciliationItemRepository
+	ChannelClientRepo                 repository.ChannelClientRepository
+	TelegramBroadcastRepo             repository.TelegramBroadcastRepository
+	MemberLevelRepo                   repository.MemberLevelRepository
+	MemberLevelPriceRepo              repository.MemberLevelPriceRepository
+	MediaRepo                         repository.MediaRepository
+	PostCategoryRepo                  repository.PostCategoryRepository
 
 	// Services
 	AuthzService                  *authz.Service
@@ -218,6 +219,7 @@ func (c *Container) initRepositories() {
 	c.ProductMappingRepo = repository.NewProductMappingRepository(db)
 	c.SKUMappingRepo = repository.NewSKUMappingRepository(db)
 	c.ProviderCatalogSyncRunRepo = repository.NewProviderCatalogSyncRunRepository(db)
+	c.ProviderCatalogContentSyncRunRepo = repository.NewProviderCatalogContentSyncRunRepository(db)
 	c.TGXInventorySyncRunRepo = repository.NewTGXInventorySyncRunRepository(db)
 	c.ProviderBalanceSnapshotRepo = repository.NewProviderBalanceSnapshotRepository(db)
 	c.ProcurementOrderRepo = repository.NewProcurementOrderRepository(db)
@@ -342,6 +344,7 @@ func (c *Container) initServices() {
 	c.ProductMappingService.SetCategoryService(c.CategoryService)
 	c.ProductMappingService.SetSettingService(c.SettingService)
 	c.ProductMappingService.SetProviderCatalogSyncRunRepository(c.ProviderCatalogSyncRunRepo)
+	c.ProductMappingService.SetProviderCatalogContentSyncRunRepository(c.ProviderCatalogContentSyncRunRepo)
 	c.ProductMappingService.SetTGXInventorySyncRunRepository(c.TGXInventorySyncRunRepo)
 	c.ProductMappingService.SetNotificationService(c.NotificationService)
 	c.OrderService.SetProductMappingService(c.ProductMappingService)

@@ -169,6 +169,7 @@ func AutoMigrate() error {
 		&ProductMapping{},
 		&SKUMapping{},
 		&ProviderCatalogSyncRun{},
+		&ProviderCatalogContentSyncRun{},
 		&TGXInventorySyncRun{},
 		&ProviderBalanceSnapshot{},
 		&ProcurementOrder{},

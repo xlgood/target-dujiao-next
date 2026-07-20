@@ -11,10 +11,11 @@ import (
 )
 
 const (
-	ModeAll             = "all"
-	ModeAPI             = "api"
-	ModeWorker          = "worker"
-	ModeInventoryWorker = "inventory-worker"
+	ModeAll                  = "all"
+	ModeAPI                  = "api"
+	ModeWorker               = "worker"
+	ModeInventoryWorker      = "inventory-worker"
+	ModeCatalogContentWorker = "catalog-content-worker"
 )
 
 // Options 应用启动选项
