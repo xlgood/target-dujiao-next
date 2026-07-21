@@ -127,7 +127,7 @@ func TestSanitizeProviderCatalogLinesDropsExternalURLLines(t *testing.T) {
 func TestProviderCatalogContentRemovesExternalToolWorkflow(t *testing.T) {
 	content, _ := providerCatalogCustomerContent(providerCatalogContentSource{
 		Provider:    upstream.CatalogProviderTGX,
-		Description: "默认发货心蓝格式：邮箱----密码----clientid----授权码<br>心蓝邮箱助手是付费软件（69元一年）<br>下载地址：https://www.bhdata.com/soft/list.html<br>步骤一：登陆心蓝邮箱助手，点击工具栏导入<br>步骤2：一行一个，确保导入时正确解析<br>账号可通过 OAuth2 登录",
+		Description: "默认发货心蓝格式：邮箱----密码----clientid----授权码<br>心蓝邮箱助手是付费软件（69元一年），可批量登录开通了 pop、imap 之类的邮箱<br>下载地址：https://www.bhdata.com/soft/list.html<br>步骤一：登陆心蓝邮箱助手，点击工具栏导入<br>步骤2：一行一个，确保导入时正确解析<br>账号可通过 OAuth2 登录",
 	})
 	zhCN, _ := content["zh-CN"].(string)
 	for _, forbidden := range []string{"心蓝", "69元", "bhdata", "步骤一", "步骤2", "clientid", "授权码"} {
@@ -135,8 +135,10 @@ func TestProviderCatalogContentRemovesExternalToolWorkflow(t *testing.T) {
 			t.Fatalf("external tool workflow leaked %q: %s", forbidden, zhCN)
 		}
 	}
-	if !strings.Contains(zhCN, "OAuth2") {
-		t.Fatalf("independent product information was lost: %s", zhCN)
+	for _, expected := range []string{"交付内容：邮箱地址、密码、客户端标识、授权信息。", "使用方式：请使用支持 OAuth2 登录的邮件客户端，通过 POP/IMAP 配置邮箱。"} {
+		if !strings.Contains(zhCN, expected) {
+			t.Fatalf("safe replacement missing %q: %s", expected, zhCN)
+		}
 	}
 }
 

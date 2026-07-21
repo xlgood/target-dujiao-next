@@ -8,6 +8,7 @@ import (
 	"html"
 	"net/url"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -51,7 +52,7 @@ type providerCatalogContentLine struct {
 	TutorialURL string
 }
 
-const providerCatalogContentSanitizerVersion = "v2"
+const providerCatalogContentSanitizerVersion = "v3"
 
 func (s *ProductMappingService) SetProviderCatalogContentSyncRunRepository(repo repository.ProviderCatalogContentSyncRunRepository) {
 	s.contentSyncRunRepo = repo
@@ -251,6 +252,7 @@ var (
 	catalogToolStepRE = regexp.MustCompile(`(?i)(?:^\s*步骤|^\s*步驟)`)
 	catalogTutorialRE = regexp.MustCompile(`(?i)(?:教程|教學|指南|tutorial|guide|how\s+to|login\s+steps?)`)
 	catalogDownloadRE = regexp.MustCompile(`(?i)(?:下载|下載|download)`)
+	catalogFormatRE   = regexp.MustCompile(`(?i)(?:格式|format)\s*[：:]\s*([^\r\n<]+)`)
 )
 
 func providerCatalogDisplayTitle(value string) string {
@@ -261,6 +263,9 @@ func providerCatalogDisplayTitle(value string) string {
 
 func providerCatalogCustomerContent(source providerCatalogContentSource) (models.JSON, models.JSON) {
 	lines := sanitizeProviderCatalogContentLines(source.Description)
+	if source.requiresExternalToolRewrite() {
+		lines = providerCatalogExternalToolSafeLines(source)
+	}
 	if len(lines) == 0 {
 		lines = []providerCatalogContentLine{{Text: "商品资料正在更新，请确认所需信息后提交订单。"}}
 	}
@@ -307,6 +312,70 @@ func providerCatalogCustomerContent(source providerCatalogContentSource) (models
 func (source providerCatalogContentSource) isCustomComments() bool {
 	text := strings.ToLower(source.ServiceType + " " + source.Name)
 	return strings.Contains(text, "custom comment") || strings.Contains(text, "自定义评论") || strings.Contains(text, "自訂評論")
+}
+
+func (source providerCatalogContentSource) requiresExternalToolRewrite() bool {
+	return catalogToolRE.MatchString(source.Name) || catalogToolRE.MatchString(source.Description)
+}
+
+// providerCatalogExternalToolSafeLines replaces a tool-specific workflow with
+// customer-usable delivery fields and neutral configuration guidance.
+func providerCatalogExternalToolSafeLines(source providerCatalogContentSource) []providerCatalogContentLine {
+	text := source.Name + "\n" + source.Description
+	fields := providerCatalogDeliveryFields(source.Description)
+	lines := make([]providerCatalogContentLine, 0, 2)
+	if len(fields) > 0 {
+		lines = append(lines, providerCatalogContentLine{Text: "交付内容：" + strings.Join(fields, "、") + "。"})
+	}
+	upper := strings.ToUpper(text)
+	if strings.Contains(upper, "OAUTH2") || strings.Contains(upper, "POP") || strings.Contains(upper, "IMAP") {
+		protocols := make([]string, 0, 2)
+		if strings.Contains(upper, "POP") {
+			protocols = append(protocols, "POP")
+		}
+		if strings.Contains(upper, "IMAP") {
+			protocols = append(protocols, "IMAP")
+		}
+		if len(protocols) > 0 {
+			lines = append(lines, providerCatalogContentLine{Text: "使用方式：请使用支持 OAuth2 登录的邮件客户端，通过 " + strings.Join(protocols, "/") + " 配置邮箱。"})
+		} else {
+			lines = append(lines, providerCatalogContentLine{Text: "使用方式：请使用支持 OAuth2 登录的邮件客户端完成配置。"})
+		}
+	}
+	return lines
+}
+
+func providerCatalogDeliveryFields(description string) []string {
+	match := catalogFormatRE.FindStringSubmatch(description)
+	if len(match) < 2 {
+		return nil
+	}
+	value := strings.ToLower(match[1])
+	known := []struct {
+		contains string
+		label    string
+	}{
+		{"邮箱", "邮箱地址"}, {"email", "邮箱地址"},
+		{"账号", "账号"}, {"帳號", "账号"}, {"account", "账号"},
+		{"密码", "密码"}, {"密碼", "密码"}, {"password", "密码"},
+		{"clientid", "客户端标识"}, {"client_id", "客户端标识"}, {"客户端", "客户端标识"}, {"客戶端", "客户端标识"},
+		{"refresh_token", "刷新令牌"}, {"refreshtoken", "刷新令牌"},
+		{"授权码", "授权信息"}, {"授權碼", "授权信息"}, {"auth code", "授权信息"},
+		{"token", "访问令牌"}, {"令牌", "访问令牌"},
+		{"2fa", "两步验证信息"},
+		{"手机", "手机号码"}, {"手機", "手机号码"}, {"phone", "手机号码"},
+	}
+	seen := make(map[string]bool)
+	fields := make([]string, 0, len(known))
+	for _, field := range known {
+		if strings.Contains(value, field.contains) && !seen[field.label] {
+			seen[field.label] = true
+			fields = append(fields, field.label)
+		}
+	}
+	order := map[string]int{"账号": 1, "邮箱地址": 2, "密码": 3, "客户端标识": 4, "授权信息": 5, "访问令牌": 6, "刷新令牌": 7, "两步验证信息": 8, "手机号码": 9}
+	sort.SliceStable(fields, func(i, j int) bool { return order[fields[i]] < order[fields[j]] })
+	return fields
 }
 
 func sanitizeProviderCatalogLabel(value string) string {
