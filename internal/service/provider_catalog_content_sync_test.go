@@ -124,6 +124,41 @@ func TestSanitizeProviderCatalogLinesDropsExternalURLLines(t *testing.T) {
 	}
 }
 
+func TestProviderCatalogContentRemovesExternalToolWorkflow(t *testing.T) {
+	content, _ := providerCatalogCustomerContent(providerCatalogContentSource{
+		Provider:    upstream.CatalogProviderTGX,
+		Description: "默认发货心蓝格式：邮箱----密码----clientid----授权码<br>心蓝邮箱助手是付费软件（69元一年）<br>下载地址：https://www.bhdata.com/soft/list.html<br>步骤一：登陆心蓝邮箱助手，点击工具栏导入<br>步骤2：一行一个，确保导入时正确解析<br>账号可通过 OAuth2 登录",
+	})
+	zhCN, _ := content["zh-CN"].(string)
+	for _, forbidden := range []string{"心蓝", "69元", "bhdata", "步骤一", "步骤2", "clientid", "授权码"} {
+		if strings.Contains(zhCN, forbidden) {
+			t.Fatalf("external tool workflow leaked %q: %s", forbidden, zhCN)
+		}
+	}
+	if !strings.Contains(zhCN, "OAuth2") {
+		t.Fatalf("independent product information was lost: %s", zhCN)
+	}
+}
+
+func TestProviderCatalogContentKeepsTutorialLinkButDropsDownloadLink(t *testing.T) {
+	content, _ := providerCatalogCustomerContent(providerCatalogContentSource{
+		Provider:    upstream.CatalogProviderTGX,
+		Description: "token登录教程：https://2fa.free/jc/Twitter/11<br>下载地址：https://example.com/download<br>账号格式：账号----密码",
+	})
+	zhCN, _ := content["zh-CN"].(string)
+	if !strings.Contains(zhCN, `href="https://2fa.free/jc/Twitter/11"`) || !strings.Contains(zhCN, "查看教程") {
+		t.Fatalf("tutorial link missing: %s", zhCN)
+	}
+	for _, forbidden := range []string{"example.com", "下载地址", "https://2fa.free/jc/Twitter/11" + "</p>"} {
+		if strings.Contains(zhCN, forbidden) {
+			t.Fatalf("unexpected raw or download URL content %q: %s", forbidden, zhCN)
+		}
+	}
+	if !strings.Contains(zhCN, "账号格式") {
+		t.Fatalf("safe detail missing: %s", zhCN)
+	}
+}
+
 func TestProviderCatalogContentSyncSkipsInactiveMappings(t *testing.T) {
 	db := setupProviderCatalogImportDB(t)
 	svc := NewProductMappingService(

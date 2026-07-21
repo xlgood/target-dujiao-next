@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"html"
+	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
@@ -44,6 +45,13 @@ type providerCatalogContentSource struct {
 	AverageTime string
 	ServiceType string
 }
+
+type providerCatalogContentLine struct {
+	Text        string
+	TutorialURL string
+}
+
+const providerCatalogContentSanitizerVersion = "v2"
 
 func (s *ProductMappingService) SetProviderCatalogContentSyncRunRepository(repo repository.ProviderCatalogContentSyncRunRepository) {
 	s.contentSyncRunRepo = repo
@@ -226,6 +234,7 @@ func (s *ProductMappingService) recordProviderCatalogContentSyncRun(startedAt ti
 
 func providerCatalogContentHash(source providerCatalogContentSource) string {
 	sum := sha256.Sum256([]byte(strings.Join([]string{
+		providerCatalogContentSanitizerVersion,
 		strings.TrimSpace(source.Provider), strings.TrimSpace(source.Code), strings.TrimSpace(source.Name),
 		strings.TrimSpace(source.Category), strings.TrimSpace(source.Description), strings.TrimSpace(source.AverageTime), strings.TrimSpace(source.ServiceType),
 	}, "\x00")))
@@ -233,10 +242,15 @@ func providerCatalogContentHash(source providerCatalogContentSource) string {
 }
 
 var (
-	catalogURLRE     = regexp.MustCompile(`(?i)(?:https?://|www\.)[^\s<]+`)
-	catalogEmailRE   = regexp.MustCompile(`(?i)\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b`)
-	catalogSourceRE  = regexp.MustCompile(`(?i)(?:fans\s*gurus|fansgurus|tgx\s*account|tgx|upstream|supplier|provider|source|merchant|vendor|供货|供應|供应商|供應商|服务商|服務商|上游|货源|貨源|平台代理|平台商家|來源|来源|商家)`)
-	catalogContactRE = regexp.MustCompile(`(?i)(?:联系客服|聯繫客服|联系.*客服|聯絡.*客服|contact.*support|customer\s*service|whatsapp|telegram|t\.me)`)
+	catalogURLRE      = regexp.MustCompile(`(?i)(?:https?://|www\.)[^\s<]+`)
+	catalogEmailRE    = regexp.MustCompile(`(?i)\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b`)
+	catalogSourceRE   = regexp.MustCompile(`(?i)(?:fans\s*gurus|fansgurus|tgx\s*account|tgx|upstream|supplier|provider|source|merchant|vendor|心蓝|心藍|bhdata|供货|供應|供应商|供應商|服务商|服務商|上游|货源|貨源|平台代理|平台商家|來源|来源|商家)`)
+	catalogContactRE  = regexp.MustCompile(`(?i)(?:联系客服|聯繫客服|联系.*客服|聯絡.*客服|contact.*support|customer\s*service|whatsapp|telegram|t\.me)`)
+	catalogAnchorRE   = regexp.MustCompile(`(?is)<a\s+[^>]*href\s*=\s*["']([^"']+)["'][^>]*>(.*?)</a>`)
+	catalogToolRE     = regexp.MustCompile(`(?i)(?:心蓝|心藍|bhdata)`)
+	catalogToolStepRE = regexp.MustCompile(`(?i)(?:^\s*步骤|^\s*步驟)`)
+	catalogTutorialRE = regexp.MustCompile(`(?i)(?:教程|教學|指南|tutorial|guide|how\s+to|login\s+steps?)`)
+	catalogDownloadRE = regexp.MustCompile(`(?i)(?:下载|下載|download)`)
 )
 
 func providerCatalogDisplayTitle(value string) string {
@@ -246,15 +260,20 @@ func providerCatalogDisplayTitle(value string) string {
 }
 
 func providerCatalogCustomerContent(source providerCatalogContentSource) (models.JSON, models.JSON) {
-	lines := sanitizeProviderCatalogLines(source.Description)
+	lines := sanitizeProviderCatalogContentLines(source.Description)
 	if len(lines) == 0 {
-		lines = []string{"商品资料正在更新，请确认所需信息后提交订单。"}
+		lines = []providerCatalogContentLine{{Text: "商品资料正在更新，请确认所需信息后提交订单。"}}
 	}
 	var content strings.Builder
 	content.WriteString("<h3>商品说明</h3>")
 	for _, line := range lines {
 		content.WriteString("<p>")
-		content.WriteString(html.EscapeString(line))
+		content.WriteString(html.EscapeString(line.Text))
+		if line.TutorialURL != "" {
+			content.WriteString(` <a href="`)
+			content.WriteString(html.EscapeString(line.TutorialURL))
+			content.WriteString(`" target="_blank" rel="noopener noreferrer nofollow">查看教程</a>`)
+		}
 		content.WriteString("</p>")
 	}
 	if category := sanitizeProviderCatalogLabel(source.Category); category != "" || strings.TrimSpace(source.AverageTime) != "" {
@@ -274,7 +293,11 @@ func providerCatalogCustomerContent(source providerCatalogContentSource) (models
 	if source.Provider == upstream.CatalogProviderFansGurus && source.isCustomComments() {
 		content.WriteString("<h3>填写要求</h3><p>请填写目标链接，并每行填写一条评论。数量和金额会按有效评论条数自动计算。</p>")
 	}
-	summary := strings.Join(lines, " ")
+	summaryParts := make([]string, 0, len(lines))
+	for _, line := range lines {
+		summaryParts = append(summaryParts, line.Text)
+	}
+	summary := strings.Join(summaryParts, " ")
 	if len([]rune(summary)) > 180 {
 		summary = string([]rune(summary)[:180]) + "..."
 	}
@@ -295,25 +318,64 @@ func sanitizeProviderCatalogLabel(value string) string {
 }
 
 func sanitizeProviderCatalogLines(raw string) []string {
+	contentLines := sanitizeProviderCatalogContentLines(raw)
+	result := make([]string, 0, len(contentLines))
+	for _, line := range contentLines {
+		result = append(result, line.Text)
+	}
+	return result
+}
+
+func sanitizeProviderCatalogContentLines(raw string) []providerCatalogContentLine {
 	plain := strings.NewReplacer(
 		"<br>", "\n", "<br/>", "\n", "<br />", "\n", "</p>", "\n", "</div>", "\n", "</li>", "\n",
 	).Replace(raw)
+	plain = catalogAnchorRE.ReplaceAllString(plain, "$2 $1")
 	plain = regexp.MustCompile(`(?s)<[^>]*>`).ReplaceAllString(plain, "")
 	plain = html.UnescapeString(plain)
-	result := make([]string, 0)
+	result := make([]providerCatalogContentLine, 0)
+	externalToolContext := false
 	for _, rawLine := range strings.Split(plain, "\n") {
-		// A source URL or mailbox has no safe customer-facing equivalent. Drop
-		// its entire line instead of leaving a misleading fragment behind.
-		if catalogURLRE.MatchString(rawLine) || catalogEmailRE.MatchString(rawLine) {
+		if catalogToolRE.MatchString(rawLine) {
+			externalToolContext = true
+		}
+		if externalToolContext && catalogToolStepRE.MatchString(rawLine) {
+			continue
+		}
+		if catalogSourceRE.MatchString(rawLine) || catalogContactRE.MatchString(rawLine) || catalogEmailRE.MatchString(rawLine) {
+			continue
+		}
+		tutorialURL := catalogTutorialURL(rawLine)
+		if catalogURLRE.MatchString(rawLine) && tutorialURL == "" {
+			// Source, download, and unclassified external links do not have a
+			// safe customer-facing equivalent, so remove their whole line.
 			continue
 		}
 		line := sanitizeProviderCatalogLine(rawLine)
 		if line == "" || catalogSourceRE.MatchString(line) || catalogContactRE.MatchString(line) {
 			continue
 		}
-		result = append(result, line)
+		result = append(result, providerCatalogContentLine{Text: line, TutorialURL: tutorialURL})
 	}
 	return result
+}
+
+func catalogTutorialURL(rawLine string) string {
+	if !catalogTutorialRE.MatchString(rawLine) || catalogDownloadRE.MatchString(rawLine) {
+		return ""
+	}
+	value := strings.TrimRight(catalogURLRE.FindString(rawLine), ".,，。;；:：!！?？)）]】}>\"'")
+	if value == "" {
+		return ""
+	}
+	if strings.HasPrefix(strings.ToLower(value), "www.") {
+		value = "https://" + value
+	}
+	parsed, err := url.Parse(value)
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
+		return ""
+	}
+	return parsed.String()
 }
 
 func sanitizeProviderCatalogLine(value string) string {
