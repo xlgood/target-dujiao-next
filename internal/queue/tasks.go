@@ -148,8 +148,8 @@ func NewUpstreamSyncStockTask() *asynq.Task {
 }
 
 // ProviderCatalogContentSyncPayload names the two configured provider
-// connections. The task updates descriptions only; it never changes catalog
-// prices, stock, forms, review state, or publication state.
+// connections. It refreshes safe customer copy plus each TGX item's purchase
+// profile; it never changes catalog prices, stock, review state, or publication.
 type ProviderCatalogContentSyncPayload struct {
 	FansGurusConnectionID uint `json:"fansgurus_connection_id"`
 	TGXConnectionID       uint `json:"tgx_connection_id"`

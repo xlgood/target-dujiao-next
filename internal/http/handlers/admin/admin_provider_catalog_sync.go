@@ -97,9 +97,9 @@ func (h *Handler) SyncProviderCatalog(c *gin.Context) {
 	response.Success(c, result)
 }
 
-// SyncProviderCatalogContent refreshes safe storefront descriptions only.
-// It deliberately leaves prices, stock, forms, reviews, and publication state
-// untouched, so it can run independently from the catalog sync.
+// SyncProviderCatalogContent refreshes safe storefront descriptions and
+// per-item TGX purchase profiles. It deliberately leaves prices, stock,
+// reviews, and publication state untouched.
 func (h *Handler) SyncProviderCatalogContent(c *gin.Context) {
 	var req syncProviderCatalogRequest
 	if err := c.ShouldBindJSON(&req); err != nil {

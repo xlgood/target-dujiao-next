@@ -476,6 +476,57 @@ func ensureProviderCatalogReviewCorrectionMigration() error {
 	})
 }
 
+// ensureTGXVerifiedFormProfileMigration records the single product-page
+// verification made during the initial TGX rollout. This is intentionally a
+// code-specific exception: it must not change how other items are interpreted.
+func ensureTGXVerifiedFormProfileMigration() error {
+	if DB == nil {
+		return errors.New("database is not initialized")
+	}
+	var marker Setting
+	if err := DB.First(&marker, "key = ?", tgxVerifiedFormProfileMigrationSettingKey).Error; err == nil && migrationDone(marker.ValueJSON) {
+		return nil
+	} else if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		return err
+	}
+
+	return DB.Transaction(func(tx *gorm.DB) error {
+		var mapping ProductMapping
+		err := tx.Where("provider = ? AND upstream_product_code = ? AND deleted_at IS NULL", "tgx", "A821AB6AEEECA7C1").First(&mapping).Error
+		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+			return err
+		}
+		if err == nil {
+			now := time.Now().UTC()
+			schema := JSON{"fields": []interface{}{JSON{
+				"key":         "contact",
+				"type":        "email",
+				"label":       localizedFormProfileText("联系邮箱", "聯絡信箱", "Contact email"),
+				"placeholder": localizedFormProfileText("请输入可接收订单通知的邮箱地址", "請輸入可接收訂單通知的信箱", "Enter an email address that can receive order notices"),
+				"help":        localizedFormProfileText("用于订单查询和必要通知，不用于登录商品账号。", "用於訂單查詢與必要通知，不用於登入商品帳號。", "Used for order lookup and essential notices, not for signing in to the account."),
+				"required":    true,
+			}}}
+			if err := tx.Model(&Product{}).Where("id = ?", mapping.LocalProductID).Update("manual_form_schema_json", schema).Error; err != nil {
+				return err
+			}
+			if err := tx.Model(&ProductMapping{}).Where("id = ?", mapping.ID).Updates(map[string]interface{}{
+				"manual_form_schema_override_json": schema,
+				"manual_form_schema_locked":        true,
+				"manual_form_schema_verified_at":   &now,
+				"catalog_profile_source":           "verified",
+				"catalog_profile_synced_at":        &now,
+			}).Error; err != nil {
+				return err
+			}
+		}
+		return tx.Save(&Setting{Key: tgxVerifiedFormProfileMigrationSettingKey, ValueJSON: JSON{"done": true, "migrated_at": time.Now().UTC().Format(time.RFC3339)}}).Error
+	})
+}
+
+func localizedFormProfileText(zhCN, zhTW, enUS string) JSON {
+	return JSON{"zh-CN": zhCN, "zh-TW": zhTW, "en-US": enUS}
+}
+
 // ensureOrderItemOriginalPriceMigration 为历史订单项回填原价快照。
 // 历史数据没有真实原价，只能以当时已记录的 unit_price/total_price 作为兼容回填。
 func ensureOrderItemOriginalPriceMigration() error {

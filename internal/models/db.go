@@ -29,6 +29,7 @@ const (
 	tgxCatalogCustomerCopyMigrationSettingKey       = "migration/tgx_catalog_customer_copy_v1"
 	catalogReviewMigrationSettingKey                = "migration/provider_catalog_review_v1"
 	catalogReviewCorrectionMigrationSettingKey      = "migration/provider_catalog_review_v2"
+	tgxVerifiedFormProfileMigrationSettingKey       = "migration/tgx_verified_form_profile_v1"
 	manualStockUnlimitedValue                       = -1
 )
 
@@ -229,6 +230,9 @@ func AutoMigrate() error {
 		return err
 	}
 	if err := ensureProviderCatalogReviewCorrectionMigration(); err != nil {
+		return err
+	}
+	if err := ensureTGXVerifiedFormProfileMigration(); err != nil {
 		return err
 	}
 	if err := ensureResellerIndexes(DB); err != nil {

@@ -100,9 +100,12 @@ type ProviderCatalogItem struct {
 	MaxQuantity        int
 	Variants           []ProviderCatalogVariant
 	ManualSchema       map[string]interface{}
-	Images             []string
-	SortOrder          int
-	Active             bool
+	// UpstreamFulfillmentType is derived from this item's own delivery field.
+	// It must never be inferred from the provider name.
+	UpstreamFulfillmentType string
+	Images                  []string
+	SortOrder               int
+	Active                  bool
 }
 
 type ProviderCatalogVariant struct {
@@ -133,11 +136,12 @@ func NewFansGurusCatalogItem(service FansGurusService) (ProviderCatalogItem, err
 		UpstreamPrice: service.Rate,
 		// The connection's configurable exchange/markup settings determine the
 		// local sale price during import. Keep the upstream amount unchanged here.
-		TargetPrice:        service.Rate,
-		PriceQuantityBasis: FansGurusServicePriceQuantityBasis(service),
-		MinQuantity:        service.Min,
-		MaxQuantity:        service.Max,
-		Active:             FansGurusServiceTypeSupported(service.Type),
+		TargetPrice:             service.Rate,
+		PriceQuantityBasis:      FansGurusServicePriceQuantityBasis(service),
+		MinQuantity:             service.Min,
+		MaxQuantity:             service.Max,
+		Active:                  FansGurusServiceTypeSupported(service.Type),
+		UpstreamFulfillmentType: "manual",
 	}, nil
 }
 
@@ -209,15 +213,25 @@ func NewTGXCatalogItem(commodity TGXCommodity) (ProviderCatalogItem, error) {
 		UpstreamPrice: commodity.Price,
 		// TGX quotes prices in CNY. Conversion to the site's currency depends on
 		// the configured connection rate and happens during catalog import.
-		TargetPrice:        commodity.Price,
-		PriceQuantityBasis: 1,
-		MinQuantity:        commodity.Minimum,
-		Variants:           variants,
-		ManualSchema:       manualSchema,
-		Images:             images,
-		SortOrder:          commodity.Sort,
-		Active:             true,
+		TargetPrice:             commodity.Price,
+		PriceQuantityBasis:      1,
+		MinQuantity:             commodity.Minimum,
+		Variants:                variants,
+		ManualSchema:            manualSchema,
+		UpstreamFulfillmentType: TGXDeliveryWayFulfillmentType(commodity.DeliveryWay),
+		Images:                  images,
+		SortOrder:               commodity.Sort,
+		Active:                  true,
 	}, nil
+}
+
+// TGXDeliveryWayFulfillmentType maps the documented per-item delivery_way
+// value. Unknown values remain manual rather than claiming automatic delivery.
+func TGXDeliveryWayFulfillmentType(deliveryWay string) string {
+	if strings.TrimSpace(deliveryWay) == "0" {
+		return "auto"
+	}
+	return "manual"
 }
 
 func ParseTGXConfigVariants(sharedCode string, fallbackPrice string, raw json.RawMessage) ([]ProviderCatalogVariant, error) {
@@ -520,7 +534,7 @@ func normalizeTGXWidgetFieldList(list []map[string]interface{}) []map[string]int
 		field := map[string]interface{}{
 			"key":      key,
 			"type":     fieldType,
-			"label":    label,
+			"label":    tgxLocalizedFormText(label),
 			"required": boolValue(item["required"]),
 		}
 		if fieldType == "select" {
@@ -584,11 +598,20 @@ func tgxWidgetOptions(item map[string]interface{}) []string {
 
 func addTGXContactField(schema map[string]interface{}, contactType string) {
 	var fieldType string
+	var label map[string]interface{}
+	var placeholder map[string]interface{}
+	var help map[string]interface{}
 	switch strings.TrimSpace(contactType) {
 	case "1":
 		fieldType = "email"
+		label = tgxLocalizedFormText("联系邮箱")
+		placeholder = tgxLocalizedFormText("请输入可接收订单通知的邮箱地址")
+		help = tgxLocalizedFormText("用于订单查询和必要通知。")
 	case "2":
 		fieldType = "phone"
+		label = tgxLocalizedFormText("联系方式")
+		placeholder = tgxLocalizedFormText("请输入可接收订单通知的手机号码")
+		help = tgxLocalizedFormText("用于订单查询和必要通知。")
 	default:
 		return
 	}
@@ -600,11 +623,18 @@ func addTGXContactField(schema map[string]interface{}, contactType string) {
 		}
 	}
 	schema["fields"] = append(fields, map[string]interface{}{
-		"key":      "contact",
-		"type":     fieldType,
-		"label":    "Contact",
-		"required": true,
+		"key":         "contact",
+		"type":        fieldType,
+		"label":       label,
+		"placeholder": placeholder,
+		"help":        help,
+		"required":    true,
 	})
+}
+
+func tgxLocalizedFormText(value string) map[string]interface{} {
+	value = strings.TrimSpace(value)
+	return map[string]interface{}{"zh-CN": value, "zh-TW": value, "en-US": value}
 }
 
 func firstStringValue(values map[string]interface{}, keys ...string) string {

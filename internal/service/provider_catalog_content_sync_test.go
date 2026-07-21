@@ -15,6 +15,23 @@ type fakeFansGurusCatalogContentClient struct {
 	err     error
 }
 
+type fakeTGXCatalogItemClient struct {
+	items    []upstream.TGXCommodity
+	profiles map[string]upstream.TGXCommodity
+}
+
+func (c fakeTGXCatalogItemClient) ListItems(context.Context) (*upstream.TGXItemsResponse, error) {
+	return &upstream.TGXItemsResponse{Items: c.items}, nil
+}
+
+func (c fakeTGXCatalogItemClient) GetItem(_ context.Context, sharedCode string) (*upstream.TGXCommodity, error) {
+	item, ok := c.profiles[sharedCode]
+	if !ok {
+		return nil, nil
+	}
+	return &item, nil
+}
+
 func (c fakeFansGurusCatalogContentClient) ListCatalogDetails(context.Context) ([]upstream.FansGurusCatalogDetail, error) {
 	return c.details, c.err
 }
@@ -186,5 +203,66 @@ func TestProviderCatalogContentSyncSkipsInactiveMappings(t *testing.T) {
 	}
 	if result.Updated != 0 || result.Skipped != 1 {
 		t.Fatalf("result=%+v", result)
+	}
+}
+
+func TestProviderCatalogContentSyncUsesTGXProfilePerMapping(t *testing.T) {
+	db := setupProviderCatalogImportDB(t)
+	if err := db.AutoMigrate(&models.ProviderCatalogContentSyncRun{}); err != nil {
+		t.Fatal(err)
+	}
+	svc := NewProductMappingService(
+		repository.NewProductMappingRepository(db), repository.NewSKUMappingRepository(db),
+		repository.NewProductRepository(db), repository.NewProductSKURepository(db),
+		repository.NewCategoryRepository(db), nil,
+	)
+	svc.SetProviderCatalogContentSyncRunRepository(repository.NewProviderCatalogContentSyncRunRepository(db))
+	first, err := upstream.NewTGXCatalogItem(upstream.TGXCommodity{Code: "PROFILE-A", Name: "Outlook item A", Price: "1", ContactType: "2", DeliveryWay: "1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := upstream.NewTGXCatalogItem(upstream.TGXCommodity{Code: "PROFILE-B", Name: "Outlook item B", Price: "1", ContactType: "1", DeliveryWay: "0"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.ImportProviderCatalogByProviderConnections(map[string]uint{upstream.CatalogProviderTGX: 20}, upstream.FilteredCatalog{TGX: []upstream.ProviderCatalogItem{first, second}}); err != nil {
+		t.Fatal(err)
+	}
+	result, err := svc.SyncProviderCatalogContentWithClients(context.Background(), ProviderCatalogContentSyncInput{TGXConnectionID: 20},
+		fakeFansGurusCatalogContentClient{},
+		fakeTGXCatalogItemClient{
+			items: []upstream.TGXCommodity{{Code: "PROFILE-A", Name: "Outlook item A", Price: "1"}, {Code: "PROFILE-B", Name: "Outlook item B", Price: "1"}},
+			profiles: map[string]upstream.TGXCommodity{
+				"PROFILE-A": {Code: "PROFILE-A", Name: "Outlook item A", Price: "1", ContactType: "1", DeliveryWay: "0"},
+				"PROFILE-B": {Code: "PROFILE-B", Name: "Outlook item B", Price: "1", ContactType: "2", DeliveryWay: "1"},
+			},
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.TGXProfilePulled != 2 || result.TGXProfileFailed != 0 {
+		t.Fatalf("profile result=%+v", result)
+	}
+	var mappings []models.ProductMapping
+	if err := db.Order("upstream_product_code ASC").Find(&mappings).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(mappings) != 2 || mappings[0].UpstreamFulfillmentType != "auto" || mappings[1].UpstreamFulfillmentType != "manual" {
+		t.Fatalf("profile delivery values were not stored per item: %+v", mappings)
+	}
+	for _, mapping := range mappings {
+		var product models.Product
+		if err := db.First(&product, mapping.LocalProductID).Error; err != nil {
+			t.Fatal(err)
+		}
+		fields := product.ManualFormSchemaJSON["fields"].([]interface{})
+		field := fields[0].(map[string]interface{})
+		if mapping.UpstreamProductCode == "PROFILE-A" && field["type"] != "email" {
+			t.Fatalf("PROFILE-A type=%v, want email", field["type"])
+		}
+		if mapping.UpstreamProductCode == "PROFILE-B" && field["type"] != "phone" {
+			t.Fatalf("PROFILE-B type=%v, want phone", field["type"])
+		}
 	}
 }

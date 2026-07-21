@@ -479,6 +479,78 @@ func TestImportProviderCatalogRefreshPreservesTGXRealTimeStock(t *testing.T) {
 	}
 }
 
+func TestImportProviderCatalogKeepsFormOverrideButRefreshesOtherTGXProfiles(t *testing.T) {
+	db := setupProviderCatalogImportDB(t)
+	svc := NewProductMappingService(
+		repository.NewProductMappingRepository(db), repository.NewSKUMappingRepository(db),
+		repository.NewProductRepository(db), repository.NewProductSKURepository(db),
+		repository.NewCategoryRepository(db), nil,
+	)
+
+	first, err := upstream.NewTGXCatalogItem(upstream.TGXCommodity{Code: "LOCKED", Name: "Outlook locked item", Price: "1", ContactType: "2", DeliveryWay: "1"})
+	if err != nil {
+		t.Fatalf("NewTGXCatalogItem locked: %v", err)
+	}
+	second, err := upstream.NewTGXCatalogItem(upstream.TGXCommodity{Code: "DYNAMIC", Name: "Outlook dynamic item", Price: "1", ContactType: "1", DeliveryWay: "0"})
+	if err != nil {
+		t.Fatalf("NewTGXCatalogItem dynamic: %v", err)
+	}
+	if _, err := svc.ImportProviderCatalogByProviderConnections(map[string]uint{upstream.CatalogProviderTGX: 20}, upstream.FilteredCatalog{TGX: []upstream.ProviderCatalogItem{first, second}}); err != nil {
+		t.Fatalf("first import: %v", err)
+	}
+
+	var locked models.ProductMapping
+	if err := db.Where("upstream_product_code = ?", "LOCKED").First(&locked).Error; err != nil {
+		t.Fatalf("load locked mapping: %v", err)
+	}
+	override := models.JSON{"fields": []interface{}{models.JSON{"key": "contact", "type": "email", "label": models.JSON{"zh-CN": "联系邮箱"}, "required": true}}}
+	if err := db.Model(&models.ProductMapping{}).Where("id = ?", locked.ID).Updates(map[string]interface{}{
+		"manual_form_schema_override_json": override,
+		"manual_form_schema_locked":        true,
+	}).Error; err != nil {
+		t.Fatalf("lock profile: %v", err)
+	}
+	if err := db.Model(&models.Product{}).Where("id = ?", locked.LocalProductID).Update("manual_form_schema_json", override).Error; err != nil {
+		t.Fatalf("apply override: %v", err)
+	}
+
+	refreshedFirst, err := upstream.NewTGXCatalogItem(upstream.TGXCommodity{Code: "LOCKED", Name: "Outlook locked item", Price: "1", ContactType: "2", DeliveryWay: "0"})
+	if err != nil {
+		t.Fatalf("NewTGXCatalogItem refreshed locked: %v", err)
+	}
+	refreshedSecond, err := upstream.NewTGXCatalogItem(upstream.TGXCommodity{Code: "DYNAMIC", Name: "Outlook dynamic item", Price: "1", ContactType: "2", DeliveryWay: "1"})
+	if err != nil {
+		t.Fatalf("NewTGXCatalogItem refreshed dynamic: %v", err)
+	}
+	if _, err := svc.ImportProviderCatalogByProviderConnections(map[string]uint{upstream.CatalogProviderTGX: 20}, upstream.FilteredCatalog{TGX: []upstream.ProviderCatalogItem{refreshedFirst, refreshedSecond}}); err != nil {
+		t.Fatalf("refresh import: %v", err)
+	}
+
+	var lockedProduct models.Product
+	if err := db.First(&lockedProduct, locked.LocalProductID).Error; err != nil {
+		t.Fatalf("reload locked product: %v", err)
+	}
+	lockedFields := lockedProduct.ManualFormSchemaJSON["fields"].([]interface{})
+	if lockedFields[0].(map[string]interface{})["type"] != "email" {
+		t.Fatalf("locked profile was overwritten: %+v", lockedProduct.ManualFormSchemaJSON)
+	}
+	var dynamicMapping models.ProductMapping
+	if err := db.Where("upstream_product_code = ?", "DYNAMIC").First(&dynamicMapping).Error; err != nil {
+		t.Fatalf("load dynamic mapping: %v", err)
+	}
+	if dynamicMapping.UpstreamFulfillmentType != constants.FulfillmentTypeManual {
+		t.Fatalf("dynamic delivery type=%q, want manual", dynamicMapping.UpstreamFulfillmentType)
+	}
+	var dynamicProduct models.Product
+	if err := db.First(&dynamicProduct, dynamicMapping.LocalProductID).Error; err != nil {
+		t.Fatalf("reload dynamic product: %v", err)
+	}
+	dynamicFields := dynamicProduct.ManualFormSchemaJSON["fields"].([]interface{})
+	if dynamicFields[0].(map[string]interface{})["type"] != "phone" {
+		t.Fatalf("unlocked item did not refresh from its own profile: %+v", dynamicProduct.ManualFormSchemaJSON)
+	}
+}
+
 func setupProviderCatalogImportDB(t *testing.T) *gorm.DB {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open("file:"+normalizeProviderSlug(t.Name())+"?mode=memory&cache=shared"), &gorm.Config{})

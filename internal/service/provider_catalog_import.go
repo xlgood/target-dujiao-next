@@ -153,7 +153,8 @@ func (s *ProductMappingService) importProviderCatalogItemInTx(tx *gorm.DB, conne
 		Provider:                item.Provider,
 		Platform:                platform,
 		CatalogReviewStatus:     models.CatalogReviewPending,
-		UpstreamFulfillmentType: constants.FulfillmentTypeManual,
+		CatalogProfileSource:    "catalog",
+		UpstreamFulfillmentType: providerCatalogUpstreamFulfillmentType(item),
 		UpstreamStatus:          models.UpstreamStatusActive,
 		IsActive:                true,
 		LastSyncedAt:            &now,
@@ -205,6 +206,16 @@ func (s *ProductMappingService) refreshProviderCatalogItemInTx(tx *gorm.DB, mapp
 			return err
 		}
 	}
+	profileIsAuthoritative := mapping.CatalogProfileSource == "item" || mapping.CatalogProfileSource == "verified"
+	if !profileIsAuthoritative {
+		mapping.UpstreamFulfillmentType = providerCatalogUpstreamFulfillmentType(item)
+	}
+	mapping.UpstreamStatus = models.UpstreamStatusActive
+	if !profileIsAuthoritative && !mapping.ManualFormSchemaLocked {
+		mapping.CatalogProfileSource = "catalog"
+	}
+	now := time.Now()
+	mapping.LastSyncedAt = &now
 	category, err := findOrCreateProviderCategoryTx(tx, platform)
 	if err != nil {
 		return err
@@ -229,7 +240,9 @@ func (s *ProductMappingService) refreshProviderCatalogItemInTx(tx *gorm.DB, mapp
 	product.CostPriceAmount = models.NewMoneyFromDecimal(cost)
 	product.MinPurchaseQuantity = item.MinQuantity
 	product.MaxPurchaseQuantity = item.MaxQuantity
-	product.ManualFormSchemaJSON = providerCatalogManualFormSchema(item)
+	if !profileIsAuthoritative && !mapping.ManualFormSchemaLocked {
+		product.ManualFormSchemaJSON = providerCatalogManualFormSchema(item)
+	}
 	product.Images = models.StringArray(providerCatalogImages(item, platform))
 	product.SortOrder = item.SortOrder
 	product.Tags = models.StringArray{}
@@ -237,17 +250,26 @@ func (s *ProductMappingService) refreshProviderCatalogItemInTx(tx *gorm.DB, mapp
 	if err := productRepo.Update(product); err != nil {
 		return err
 	}
+	if err := s.mappingRepo.WithTx(tx).Update(mapping); err != nil {
+		return err
+	}
 	variants := item.Variants
 	if len(variants) == 0 {
 		variants = []upstream.ProviderCatalogVariant{{Code: item.Code, Name: "default", UpstreamPrice: item.UpstreamPrice, TargetPrice: item.TargetPrice, Stock: -1, Active: true}}
 	}
-	now := time.Now()
 	for _, variant := range variants {
 		if err := s.refreshProviderVariantSKU(productSKURepo, skuMappingRepo, product.ID, mapping.ID, item, variant, platform, conn, now); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func providerCatalogUpstreamFulfillmentType(item upstream.ProviderCatalogItem) string {
+	if item.UpstreamFulfillmentType == constants.FulfillmentTypeAuto {
+		return constants.FulfillmentTypeAuto
+	}
+	return constants.FulfillmentTypeManual
 }
 
 func (s *ProductMappingService) refreshProviderVariantSKU(productSKURepo repository.ProductSKURepository, skuMappingRepo repository.SKUMappingRepository, productID, mappingID uint, item upstream.ProviderCatalogItem, variant upstream.ProviderCatalogVariant, platform string, conn *models.SiteConnection, now time.Time) error {

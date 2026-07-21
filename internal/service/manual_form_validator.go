@@ -33,6 +33,7 @@ type manualFormField struct {
 	Type        string
 	Label       models.JSON
 	Placeholder models.JSON
+	Help        models.JSON
 	Required    bool
 	Regex       string
 	Min         *float64
@@ -105,6 +106,10 @@ func parseManualFormSchema(schemaJSON models.JSON) (*manualFormSchema, models.JS
 		if err != nil {
 			return nil, nil, err
 		}
+		help, err := parseLocaleTextMapStrict(fieldMap, "help")
+		if err != nil {
+			return nil, nil, err
+		}
 		required, err := parseBoolFieldStrict(fieldMap, "required")
 		if err != nil {
 			return nil, nil, err
@@ -151,6 +156,7 @@ func parseManualFormSchema(schemaJSON models.JSON) (*manualFormSchema, models.JS
 			Type:        typeValue,
 			Label:       label,
 			Placeholder: placeholder,
+			Help:        help,
 			Required:    required,
 			Regex:       regex,
 			Min:         min,
@@ -170,6 +176,9 @@ func parseManualFormSchema(schemaJSON models.JSON) (*manualFormSchema, models.JS
 		}
 		if len(placeholder) > 0 {
 			normalizedField["placeholder"] = placeholder
+		}
+		if len(help) > 0 {
+			normalizedField["help"] = help
 		}
 		if regex != "" {
 			normalizedField["regex"] = regex

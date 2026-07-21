@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"html"
 	"net/url"
@@ -30,11 +31,20 @@ type ProviderCatalogContentSyncInput struct {
 }
 
 type ProviderCatalogContentSyncResult struct {
-	FansGurusPulled int `json:"fans_gurus_pulled"`
-	TGXPulled       int `json:"tgx_pulled"`
-	Matched         int `json:"matched"`
-	Updated         int `json:"updated"`
-	Skipped         int `json:"skipped"`
+	FansGurusPulled  int `json:"fans_gurus_pulled"`
+	TGXPulled        int `json:"tgx_pulled"`
+	TGXProfilePulled int `json:"tgx_profile_pulled"`
+	TGXProfileFailed int `json:"tgx_profile_failed"`
+	Matched          int `json:"matched"`
+	Updated          int `json:"updated"`
+	Skipped          int `json:"skipped"`
+}
+
+// TGXCatalogItemClient is optional to preserve compatibility with the list
+// endpoint. The real client implements it; tests and legacy adapters can fall
+// back to the catalog profile until it is available.
+type TGXCatalogItemClient interface {
+	GetItem(ctx context.Context, sharedCode string) (*upstream.TGXCommodity, error)
 }
 
 type providerCatalogContentSource struct {
@@ -98,6 +108,13 @@ func (s *ProductMappingService) SyncProviderCatalogContentWithClients(
 	}
 
 	sources := providerCatalogContentSources(fansDetails, tgxItems)
+	tgxProfiles, profileResult, err := s.loadTGXCatalogItemProfiles(ctx, input.TGXConnectionID, tgxClient)
+	if err != nil {
+		s.recordProviderCatalogContentSyncRun(startedAt, result, err)
+		return nil, err
+	}
+	result.TGXProfilePulled = profileResult.pulled
+	result.TGXProfileFailed = profileResult.failed
 	for _, target := range []struct {
 		connectionID uint
 		provider     string
@@ -119,6 +136,16 @@ func (s *ProductMappingService) SyncProviderCatalogContentWithClients(
 				continue
 			}
 			source, ok := sources[providerCatalogContentKey(target.provider, mappings[i].UpstreamProductCode)]
+			if target.provider == upstream.CatalogProviderTGX {
+				if profile, exists := tgxProfiles[strings.TrimSpace(mappings[i].UpstreamProductCode)]; exists {
+					if _, err := s.applyTGXCatalogItemProfile(&mappings[i], profile); err != nil {
+						s.recordProviderCatalogContentSyncRun(startedAt, result, err)
+						return nil, err
+					}
+					source = providerCatalogContentSourceFromTGXProfile(profile, source)
+					ok = true
+				}
+			}
 			if !ok || source.containsTelegram() {
 				result.Skipped++
 				continue
@@ -168,6 +195,122 @@ func providerCatalogContentSources(fansDetails []upstream.FansGurusCatalogDetail
 
 func providerCatalogContentKey(provider, code string) string {
 	return strings.ToLower(strings.TrimSpace(provider)) + ":" + strings.TrimSpace(code)
+}
+
+type tgxCatalogItemProfileResult struct {
+	pulled int
+	failed int
+}
+
+// loadTGXCatalogItemProfiles prefers each mapped product's item endpoint.
+// It runs in the dedicated content worker and shares the existing request
+// limiter, so it never creates a burst of one request per SKU.
+func (s *ProductMappingService) loadTGXCatalogItemProfiles(ctx context.Context, connectionID uint, client TGXCatalogClient) (map[string]upstream.ProviderCatalogItem, tgxCatalogItemProfileResult, error) {
+	profiles := make(map[string]upstream.ProviderCatalogItem)
+	profileClient, ok := client.(TGXCatalogItemClient)
+	if !ok || connectionID == 0 {
+		return profiles, tgxCatalogItemProfileResult{}, nil
+	}
+	mappings, err := s.mappingRepo.ListActiveByProvider(connectionID, upstream.CatalogProviderTGX)
+	if err != nil {
+		return nil, tgxCatalogItemProfileResult{}, err
+	}
+	cfg := DefaultUpstreamSyncConfig()
+	if s.settingService != nil {
+		cfg, _ = s.settingService.GetUpstreamSyncConfig("")
+	}
+	result := tgxCatalogItemProfileResult{}
+	for _, mapping := range mappings {
+		code := strings.TrimSpace(mapping.UpstreamProductCode)
+		if code == "" {
+			result.failed++
+			continue
+		}
+		if err := waitForTGXRequest(ctx, connectionID, cfg.TGXInventoryRateLimit); err != nil {
+			return nil, result, err
+		}
+		commodity, err := profileClient.GetItem(ctx, code)
+		if err != nil || commodity == nil {
+			result.failed++
+			continue
+		}
+		if strings.TrimSpace(commodity.Code) == "" {
+			commodity.Code = code
+		}
+		if strings.TrimSpace(commodity.Code) != code {
+			result.failed++
+			continue
+		}
+		item, err := upstream.NewTGXCatalogItem(*commodity)
+		if err != nil || upstream.ContainsTelegramCatalogText(item.Name, item.Category, item.Description) {
+			result.failed++
+			continue
+		}
+		profiles[code] = item
+		result.pulled++
+	}
+	return profiles, result, nil
+}
+
+func providerCatalogContentSourceFromTGXProfile(profile upstream.ProviderCatalogItem, fallback providerCatalogContentSource) providerCatalogContentSource {
+	result := fallback
+	result.Provider = upstream.CatalogProviderTGX
+	if value := strings.TrimSpace(profile.Code); value != "" {
+		result.Code = value
+	}
+	if value := strings.TrimSpace(profile.Name); value != "" {
+		result.Name = value
+	}
+	if value := strings.TrimSpace(profile.Category); value != "" {
+		result.Category = value
+	}
+	if value := strings.TrimSpace(profile.Description); value != "" {
+		result.Description = value
+	}
+	return result
+}
+
+func (s *ProductMappingService) applyTGXCatalogItemProfile(mapping *models.ProductMapping, item upstream.ProviderCatalogItem) (bool, error) {
+	if mapping == nil || mapping.LocalProductID == 0 || mapping.Provider != upstream.CatalogProviderTGX {
+		return false, nil
+	}
+	profileSchema := providerCatalogManualFormSchema(item)
+	profileFulfillment := providerCatalogUpstreamFulfillmentType(item)
+	changed := false
+	productID := strconv.FormatUint(uint64(mapping.LocalProductID), 10)
+	err := s.productRepo.Transaction(func(tx *gorm.DB) error {
+		product, err := s.productRepo.WithTx(tx).GetByID(productID)
+		if err != nil {
+			return err
+		}
+		if product == nil {
+			return nil
+		}
+		if !mapping.ManualFormSchemaLocked && !sameCatalogJSON(product.ManualFormSchemaJSON, profileSchema) {
+			product.ManualFormSchemaJSON = profileSchema
+			if err := s.productRepo.WithTx(tx).Update(product); err != nil {
+				return err
+			}
+			changed = true
+		}
+		now := time.Now()
+		if mapping.UpstreamFulfillmentType != profileFulfillment {
+			mapping.UpstreamFulfillmentType = profileFulfillment
+			changed = true
+		}
+		if !mapping.ManualFormSchemaLocked {
+			mapping.CatalogProfileSource = "item"
+		}
+		mapping.CatalogProfileSyncedAt = &now
+		return s.mappingRepo.WithTx(tx).Update(mapping)
+	})
+	return changed, err
+}
+
+func sameCatalogJSON(left, right models.JSON) bool {
+	leftJSON, leftErr := json.Marshal(left)
+	rightJSON, rightErr := json.Marshal(right)
+	return leftErr == nil && rightErr == nil && string(leftJSON) == string(rightJSON)
 }
 
 func (source providerCatalogContentSource) containsTelegram() bool {
@@ -222,9 +365,14 @@ func (s *ProductMappingService) recordProviderCatalogContentSyncRun(startedAt ti
 	if result != nil {
 		run.FansGurusPulled = result.FansGurusPulled
 		run.TGXPulled = result.TGXPulled
+		run.TGXProfilePulled = result.TGXProfilePulled
+		run.TGXProfileFailed = result.TGXProfileFailed
 		run.Matched = result.Matched
 		run.Updated = result.Updated
 		run.Skipped = result.Skipped
+	}
+	if result != nil && result.TGXProfileFailed > 0 && syncErr == nil {
+		run.Status = "partial"
 	}
 	if syncErr != nil {
 		run.Status = "failed"

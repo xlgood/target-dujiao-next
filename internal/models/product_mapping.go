@@ -31,18 +31,28 @@ type ProductMapping struct {
 	CatalogReviewStatus string `gorm:"type:varchar(16);not null;default:'pending';index" json:"catalog_review_status"`
 	// CatalogSource* is an admin-only evidence snapshot. Customer pages read the
 	// sanitized Product fields, never these unmodified source values.
-	CatalogSourceCategory    string         `gorm:"type:text" json:"catalog_source_category,omitempty"`
-	CatalogSourceDescription string         `gorm:"type:text" json:"catalog_source_description,omitempty"`
-	CatalogSourceAverageTime string         `gorm:"type:varchar(255)" json:"catalog_source_average_time,omitempty"`
-	CatalogSourceHash        string         `gorm:"type:char(64);index" json:"catalog_source_hash,omitempty"`
-	CatalogSourceSyncedAt    *time.Time     `json:"catalog_source_synced_at,omitempty"`
-	UpstreamFulfillmentType  string         `gorm:"type:varchar(20);not null;default:'manual'" json:"upstream_fulfillment_type"` // 上游原始交付类型（auto/manual）
-	UpstreamStatus           string         `gorm:"type:varchar(16);not null;default:'active';index" json:"upstream_status"`     // 上游商品状态：active/inactive/deleted
-	IsActive                 bool           `gorm:"not null;default:true" json:"is_active"`
-	LastSyncedAt             *time.Time     `json:"last_synced_at,omitempty"`
-	CreatedAt                time.Time      `gorm:"index" json:"created_at"`
-	UpdatedAt                time.Time      `gorm:"index" json:"updated_at"`
-	DeletedAt                gorm.DeletedAt `gorm:"index" json:"-"`
+	CatalogSourceCategory    string     `gorm:"type:text" json:"catalog_source_category,omitempty"`
+	CatalogSourceDescription string     `gorm:"type:text" json:"catalog_source_description,omitempty"`
+	CatalogSourceAverageTime string     `gorm:"type:varchar(255)" json:"catalog_source_average_time,omitempty"`
+	CatalogSourceHash        string     `gorm:"type:char(64);index" json:"catalog_source_hash,omitempty"`
+	CatalogSourceSyncedAt    *time.Time `json:"catalog_source_synced_at,omitempty"`
+	// ManualFormSchemaOverrideJSON is an operator-verified profile for this
+	// mapped product only. It keeps a confirmed exception from being replaced
+	// by a later catalogue response for another item.
+	ManualFormSchemaOverrideJSON JSON       `gorm:"type:json" json:"manual_form_schema_override,omitempty"`
+	ManualFormSchemaLocked       bool       `gorm:"not null;default:false" json:"manual_form_schema_locked"`
+	ManualFormSchemaVerifiedAt   *time.Time `json:"manual_form_schema_verified_at,omitempty"`
+	// CatalogProfileSource identifies whether the current form and delivery
+	// metadata came from the list response, the item endpoint, or verification.
+	CatalogProfileSource    string         `gorm:"type:varchar(16)" json:"catalog_profile_source,omitempty"`
+	CatalogProfileSyncedAt  *time.Time     `json:"catalog_profile_synced_at,omitempty"`
+	UpstreamFulfillmentType string         `gorm:"type:varchar(20);not null;default:'manual'" json:"upstream_fulfillment_type"` // 上游原始交付类型（auto/manual）
+	UpstreamStatus          string         `gorm:"type:varchar(16);not null;default:'active';index" json:"upstream_status"`     // 上游商品状态：active/inactive/deleted
+	IsActive                bool           `gorm:"not null;default:true" json:"is_active"`
+	LastSyncedAt            *time.Time     `json:"last_synced_at,omitempty"`
+	CreatedAt               time.Time      `gorm:"index" json:"created_at"`
+	UpdatedAt               time.Time      `gorm:"index" json:"updated_at"`
+	DeletedAt               gorm.DeletedAt `gorm:"index" json:"-"`
 
 	Connection *SiteConnection `gorm:"foreignKey:ConnectionID" json:"connection,omitempty"`
 	Product    *Product        `gorm:"foreignKey:LocalProductID" json:"product,omitempty"`

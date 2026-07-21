@@ -254,7 +254,8 @@ func TestNewTGXCatalogItemParsesDocumentedStringFields(t *testing.T) {
 		t.Fatalf("unexpected item: %+v", item)
 	}
 	fields, _ := item.ManualSchema["fields"].([]map[string]interface{})
-	if len(fields) != 1 || fields[0]["label"] != "Email" {
+	label, _ := fields[0]["label"].(map[string]interface{})
+	if len(fields) != 1 || label["zh-CN"] != "Email" {
 		t.Fatalf("unexpected manual schema: %+v", item.ManualSchema)
 	}
 }
@@ -278,6 +279,27 @@ func TestNewTGXCatalogItemUsesDocumentedCoverSortAndContactType(t *testing.T) {
 	fields, _ := item.ManualSchema["fields"].([]map[string]interface{})
 	if len(fields) != 1 || fields[0]["key"] != "contact" || fields[0]["type"] != "email" || fields[0]["required"] != true {
 		t.Fatalf("unexpected contact schema: %+v", item.ManualSchema)
+	}
+	if _, ok := fields[0]["label"].(map[string]interface{}); !ok {
+		t.Fatalf("contact label must be localized: %+v", fields[0])
+	}
+}
+
+func TestNewTGXCatalogItemUsesEachItemsDeliveryWay(t *testing.T) {
+	autoItem, err := NewTGXCatalogItem(TGXCommodity{Code: "AUTO", Name: "Automatic item", Price: "1", DeliveryWay: "0"})
+	if err != nil {
+		t.Fatalf("NewTGXCatalogItem auto: %v", err)
+	}
+	manualItem, err := NewTGXCatalogItem(TGXCommodity{Code: "MANUAL", Name: "Manual item", Price: "1", DeliveryWay: "1"})
+	if err != nil {
+		t.Fatalf("NewTGXCatalogItem manual: %v", err)
+	}
+	unknownItem, err := NewTGXCatalogItem(TGXCommodity{Code: "UNKNOWN", Name: "Unknown item", Price: "1", DeliveryWay: "unexpected"})
+	if err != nil {
+		t.Fatalf("NewTGXCatalogItem unknown: %v", err)
+	}
+	if autoItem.UpstreamFulfillmentType != "auto" || manualItem.UpstreamFulfillmentType != "manual" || unknownItem.UpstreamFulfillmentType != "manual" {
+		t.Fatalf("delivery types must be item-specific and conservative: auto=%q manual=%q unknown=%q", autoItem.UpstreamFulfillmentType, manualItem.UpstreamFulfillmentType, unknownItem.UpstreamFulfillmentType)
 	}
 }
 

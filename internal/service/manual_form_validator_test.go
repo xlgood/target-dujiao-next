@@ -235,6 +235,9 @@ func TestParseManualFormSchemaKeepI18nMeta(t *testing.T) {
 				"placeholder": map[string]interface{}{
 					"zh-CN": "请输入收件人",
 				},
+				"help": map[string]interface{}{
+					"zh-CN": "用于订单通知",
+				},
 				"required": true,
 			},
 		},
@@ -251,6 +254,10 @@ func TestParseManualFormSchemaKeepI18nMeta(t *testing.T) {
 	label, ok := fields[0]["label"].(models.JSON)
 	if !ok || label["zh-CN"] != "收件人" {
 		t.Fatalf("expected zh-CN label kept, got %#v", fields[0]["label"])
+	}
+	help, ok := fields[0]["help"].(models.JSON)
+	if !ok || help["zh-CN"] != "用于订单通知" {
+		t.Fatalf("expected zh-CN help kept, got %#v", fields[0]["help"])
 	}
 }
 
