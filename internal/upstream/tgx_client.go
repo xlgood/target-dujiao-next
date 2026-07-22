@@ -366,6 +366,14 @@ func decodeTGXItemResponse(payload json.RawMessage, sharedCode string) (*TGXComm
 		}
 		return nil, &TGXError{Kind: ErrTGXBusiness, Message: "returned item code did not match request"}
 	}
+	var directItems []TGXCommodity
+	if err := json.Unmarshal(payload, &directItems); err == nil {
+		for i := range directItems {
+			if strings.TrimSpace(directItems[i].Code) == strings.TrimSpace(sharedCode) {
+				return &directItems[i], nil
+			}
+		}
+	}
 	var catalog TGXItemsResponse
 	if err := json.Unmarshal(payload, &catalog); err == nil {
 		for i := range catalog.Items {
