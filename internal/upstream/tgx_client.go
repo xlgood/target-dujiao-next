@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -389,7 +390,35 @@ func decodeTGXItemResponse(payload json.RawMessage, sharedCode string) (*TGXComm
 			}
 		}
 	}
-	return nil, &TGXError{Kind: ErrTGXBadPayload, Message: "requested item was not returned"}
+	var category tgxCatalogCategory
+	if err := json.Unmarshal(payload, &category); err == nil {
+		for i := range category.Children {
+			if strings.TrimSpace(category.Children[i].Code) == strings.TrimSpace(sharedCode) {
+				category.Children[i].Category = category.Name
+				return &category.Children[i], nil
+			}
+		}
+	}
+	return nil, &TGXError{Kind: ErrTGXBadPayload, Message: "requested item was not returned; " + tgxPayloadShape(payload)}
+}
+
+// tgxPayloadShape exposes only JSON structure for operational diagnostics; it
+// deliberately omits response values, which can contain sensitive product data.
+func tgxPayloadShape(payload json.RawMessage) string {
+	var object map[string]json.RawMessage
+	if err := json.Unmarshal(payload, &object); err == nil && object != nil {
+		keys := make([]string, 0, len(object))
+		for key := range object {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		return "object keys=" + strings.Join(keys, ",")
+	}
+	var array []json.RawMessage
+	if err := json.Unmarshal(payload, &array); err == nil {
+		return fmt.Sprintf("array length=%d", len(array))
+	}
+	return "non-object JSON payload"
 }
 
 func (c *TGXClient) normalizeCommodityCovers(items []TGXCommodity) {
