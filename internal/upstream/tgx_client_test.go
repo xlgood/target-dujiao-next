@@ -141,6 +141,33 @@ func TestTGXClientListItemsFlattensDocumentedCategories(t *testing.T) {
 	}
 }
 
+func TestTGXClientGetItemUsesDocumentedSharedCodeParameter(t *testing.T) {
+	server := newTGXTestServer(t, func(r *http.Request) interface{} {
+		assertTGXPath(t, r, "/commodity/item")
+		if got := r.FormValue("shared_code"); got != "IG-001" {
+			t.Fatalf("shared_code=%q, want IG-001", got)
+		}
+		if got := r.FormValue("sharedCode"); got != "" {
+			t.Fatalf("legacy sharedCode unexpectedly sent: %q", got)
+		}
+		return map[string]interface{}{
+			"code": 200,
+			"data": map[string]interface{}{
+				"code": "IG-001", "name": "Aged account", "price": "100.00",
+			},
+		}
+	})
+	defer server.Close()
+
+	item, err := NewTGXClient(server.URL, "test-app-id", "app-secret").GetItem(context.Background(), "IG-001")
+	if err != nil {
+		t.Fatalf("GetItem: %v", err)
+	}
+	if item.Code != "IG-001" {
+		t.Fatalf("item=%+v", item)
+	}
+}
+
 func TestDecodeTGXCatalogCategoriesFlattensChildren(t *testing.T) {
 	payload := []byte(`[{"name":"Instagram","children":[{"id":101,"code":"IG-001","shared_code":"SHARED-001","name":"Aged account","price":100,"user_price":95.5,"factory_price":90,"delivery_way":0,"contact_type":0,"password_status":0,"draft_status":0,"inventory_hidden":0,"minimum":1,"config":"category[Standard]=100.00","widget":"[]"}]}]`)
 	items, categories, ok := decodeTGXCatalogCategories(payload)

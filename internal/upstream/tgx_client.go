@@ -343,7 +343,9 @@ func (c *TGXClient) ListItems(ctx context.Context) (*TGXItemsResponse, error) {
 }
 
 func (c *TGXClient) GetItem(ctx context.Context, sharedCode string) (*TGXCommodity, error) {
-	values := url.Values{"sharedCode": []string{sharedCode}}
+	// The single-item endpoint uses snake_case, unlike the legacy inventory
+	// endpoint. Keep this aligned with the documented request contract.
+	values := url.Values{"shared_code": []string{sharedCode}}
 	var result TGXCommodity
 	if err := c.postForm(ctx, "/commodity/item", values, &result); err != nil {
 		return nil, err
