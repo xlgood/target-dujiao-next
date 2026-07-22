@@ -343,21 +343,45 @@ func (c *TGXClient) ListItems(ctx context.Context) (*TGXItemsResponse, error) {
 }
 
 func (c *TGXClient) GetItem(ctx context.Context, sharedCode string) (*TGXCommodity, error) {
-	// The documented item endpoint uses camelCase and returns the same category
-	// structure as the catalog endpoint, narrowed to the requested product.
+	// The documented endpoint uses camelCase. Deployments return either the
+	// catalog structure or one commodity object, so decode both safely.
 	values := url.Values{"sharedCode": []string{sharedCode}}
-	var result TGXItemsResponse
+	var result json.RawMessage
 	if err := c.postForm(ctx, "/commodity/item", values, &result); err != nil {
 		return nil, err
 	}
-	for i := range result.Items {
-		if strings.TrimSpace(result.Items[i].Code) != strings.TrimSpace(sharedCode) {
-			continue
-		}
-		result.Items[i].Cover = c.resolvePublicURL(result.Items[i].Cover)
-		return &result.Items[i], nil
+	item, err := decodeTGXItemResponse(result, sharedCode)
+	if err != nil {
+		return nil, err
 	}
-	return nil, &TGXError{Kind: ErrTGXBusiness, Message: "requested item was not returned"}
+	item.Cover = c.resolvePublicURL(item.Cover)
+	return item, nil
+}
+
+func decodeTGXItemResponse(payload json.RawMessage, sharedCode string) (*TGXCommodity, error) {
+	var direct TGXCommodity
+	if err := json.Unmarshal(payload, &direct); err == nil && strings.TrimSpace(direct.Code) != "" {
+		if strings.TrimSpace(direct.Code) == strings.TrimSpace(sharedCode) {
+			return &direct, nil
+		}
+		return nil, &TGXError{Kind: ErrTGXBusiness, Message: "returned item code did not match request"}
+	}
+	var catalog TGXItemsResponse
+	if err := json.Unmarshal(payload, &catalog); err == nil {
+		for i := range catalog.Items {
+			if strings.TrimSpace(catalog.Items[i].Code) == strings.TrimSpace(sharedCode) {
+				return &catalog.Items[i], nil
+			}
+		}
+	}
+	if items, _, ok := decodeTGXCatalogCategories(payload); ok {
+		for i := range items {
+			if strings.TrimSpace(items[i].Code) == strings.TrimSpace(sharedCode) {
+				return &items[i], nil
+			}
+		}
+	}
+	return nil, &TGXError{Kind: ErrTGXBadPayload, Message: "requested item was not returned"}
 }
 
 func (c *TGXClient) normalizeCommodityCovers(items []TGXCommodity) {

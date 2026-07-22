@@ -31,13 +31,14 @@ type ProviderCatalogContentSyncInput struct {
 }
 
 type ProviderCatalogContentSyncResult struct {
-	FansGurusPulled  int `json:"fans_gurus_pulled"`
-	TGXPulled        int `json:"tgx_pulled"`
-	TGXProfilePulled int `json:"tgx_profile_pulled"`
-	TGXProfileFailed int `json:"tgx_profile_failed"`
-	Matched          int `json:"matched"`
-	Updated          int `json:"updated"`
-	Skipped          int `json:"skipped"`
+	FansGurusPulled        int    `json:"fans_gurus_pulled"`
+	TGXPulled              int    `json:"tgx_pulled"`
+	TGXProfilePulled       int    `json:"tgx_profile_pulled"`
+	TGXProfileFailed       int    `json:"tgx_profile_failed"`
+	TGXProfileFirstFailure string `json:"-"`
+	Matched                int    `json:"matched"`
+	Updated                int    `json:"updated"`
+	Skipped                int    `json:"skipped"`
 }
 
 // TGXCatalogItemClient is optional to preserve compatibility with the list
@@ -115,6 +116,7 @@ func (s *ProductMappingService) SyncProviderCatalogContentWithClients(
 	}
 	result.TGXProfilePulled = profileResult.pulled
 	result.TGXProfileFailed = profileResult.failed
+	result.TGXProfileFirstFailure = profileResult.firstFailure
 	for _, target := range []struct {
 		connectionID uint
 		provider     string
@@ -198,8 +200,9 @@ func providerCatalogContentKey(provider, code string) string {
 }
 
 type tgxCatalogItemProfileResult struct {
-	pulled int
-	failed int
+	pulled       int
+	failed       int
+	firstFailure string
 }
 
 // loadTGXCatalogItemProfiles prefers each mapped product's item endpoint.
@@ -224,6 +227,7 @@ func (s *ProductMappingService) loadTGXCatalogItemProfiles(ctx context.Context, 
 		code := strings.TrimSpace(mapping.UpstreamProductCode)
 		if code == "" {
 			result.failed++
+			result.recordFailure("mapped product has no code")
 			continue
 		}
 		if err := waitForTGXRequest(ctx, connectionID, cfg.TGXInventoryRateLimit); err != nil {
@@ -232,6 +236,11 @@ func (s *ProductMappingService) loadTGXCatalogItemProfiles(ctx context.Context, 
 		commodity, err := profileClient.GetItem(ctx, code)
 		if err != nil || commodity == nil {
 			result.failed++
+			if err != nil {
+				result.recordFailure(err.Error())
+			} else {
+				result.recordFailure("item endpoint returned no product")
+			}
 			continue
 		}
 		if strings.TrimSpace(commodity.Code) == "" {
@@ -239,17 +248,37 @@ func (s *ProductMappingService) loadTGXCatalogItemProfiles(ctx context.Context, 
 		}
 		if strings.TrimSpace(commodity.Code) != code {
 			result.failed++
+			result.recordFailure("item endpoint returned a different product code")
 			continue
 		}
 		item, err := upstream.NewTGXCatalogItem(*commodity)
 		if err != nil || upstream.ContainsTelegramCatalogText(item.Name, item.Category, item.Description) {
 			result.failed++
+			if err != nil {
+				result.recordFailure(err.Error())
+			} else {
+				result.recordFailure("item endpoint response is not eligible for catalog use")
+			}
 			continue
 		}
 		profiles[code] = item
 		result.pulled++
 	}
 	return profiles, result, nil
+}
+
+func (r *tgxCatalogItemProfileResult) recordFailure(message string) {
+	if r == nil || r.firstFailure != "" {
+		return
+	}
+	message = strings.TrimSpace(message)
+	if message == "" {
+		return
+	}
+	if len([]rune(message)) > 300 {
+		message = string([]rune(message)[:300])
+	}
+	r.firstFailure = message
 }
 
 func providerCatalogContentSourceFromTGXProfile(profile upstream.ProviderCatalogItem, fallback providerCatalogContentSource) providerCatalogContentSource {
@@ -373,6 +402,9 @@ func (s *ProductMappingService) recordProviderCatalogContentSyncRun(startedAt ti
 	}
 	if result != nil && result.TGXProfileFailed > 0 && syncErr == nil {
 		run.Status = "partial"
+		if message := strings.TrimSpace(result.TGXProfileFirstFailure); message != "" {
+			run.ErrorMessage = "tgx item profile: " + message
+		}
 	}
 	if syncErr != nil {
 		run.Status = "failed"
