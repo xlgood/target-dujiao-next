@@ -266,3 +266,44 @@ func TestProviderCatalogContentSyncUsesTGXProfilePerMapping(t *testing.T) {
 		}
 	}
 }
+
+func TestProviderCatalogContentSyncUsesOwnCatalogProfileWhenTGXItemIsEmpty(t *testing.T) {
+	db := setupProviderCatalogImportDB(t)
+	svc := NewProductMappingService(
+		repository.NewProductMappingRepository(db), repository.NewSKUMappingRepository(db),
+		repository.NewProductRepository(db), repository.NewProductSKURepository(db),
+		repository.NewCategoryRepository(db), nil,
+	)
+	initial, err := upstream.NewTGXCatalogItem(upstream.TGXCommodity{Code: "EMPTY-ITEM", Name: "Outlook Account", Price: "1", ContactType: "2", DeliveryWay: "1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.ImportProviderCatalogByProviderConnections(map[string]uint{upstream.CatalogProviderTGX: 20}, upstream.FilteredCatalog{TGX: []upstream.ProviderCatalogItem{initial}}); err != nil {
+		t.Fatal(err)
+	}
+	result, err := svc.SyncProviderCatalogContentWithClients(context.Background(), ProviderCatalogContentSyncInput{TGXConnectionID: 20},
+		fakeFansGurusCatalogContentClient{},
+		fakeTGXCatalogItemClient{items: []upstream.TGXCommodity{{Code: "EMPTY-ITEM", Name: "Outlook Account", Price: "1", ContactType: "1", DeliveryWay: "0"}}, profiles: map[string]upstream.TGXCommodity{}},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.TGXProfilePulled != 1 || result.TGXProfileFailed != 0 {
+		t.Fatalf("profile result=%+v", result)
+	}
+	var mapping models.ProductMapping
+	if err := db.First(&mapping).Error; err != nil {
+		t.Fatal(err)
+	}
+	if mapping.CatalogProfileSource != "catalog" || mapping.UpstreamFulfillmentType != "auto" {
+		t.Fatalf("mapping=%+v", mapping)
+	}
+	var product models.Product
+	if err := db.First(&product, mapping.LocalProductID).Error; err != nil {
+		t.Fatal(err)
+	}
+	fields := product.ManualFormSchemaJSON["fields"].([]interface{})
+	if fields[0].(map[string]interface{})["type"] != "email" {
+		t.Fatalf("schema=%+v", product.ManualFormSchemaJSON)
+	}
+}

@@ -140,12 +140,32 @@ func (s *ProductMappingService) SyncProviderCatalogContentWithClients(
 			source, ok := sources[providerCatalogContentKey(target.provider, mappings[i].UpstreamProductCode)]
 			if target.provider == upstream.CatalogProviderTGX {
 				if profile, exists := tgxProfiles[strings.TrimSpace(mappings[i].UpstreamProductCode)]; exists {
-					if _, err := s.applyTGXCatalogItemProfile(&mappings[i], profile); err != nil {
+					if _, err := s.applyTGXCatalogProfile(&mappings[i], profile, "item"); err != nil {
 						s.recordProviderCatalogContentSyncRun(startedAt, result, err)
 						return nil, err
 					}
 					source = providerCatalogContentSourceFromTGXProfile(profile, source)
 					ok = true
+				} else if ok {
+					// A few shared products return an empty item response even though
+					// their own directory entry is still available. Use only that
+					// entry as a fallback; never infer fields from another product.
+					fallback, err := upstream.NewTGXCatalogItem(tgxSourceCommodity(tgxItems, mappings[i].UpstreamProductCode))
+					if err != nil {
+						s.recordProviderCatalogContentSyncRun(startedAt, result, err)
+						return nil, err
+					}
+					if _, err := s.applyTGXCatalogProfile(&mappings[i], fallback, "catalog"); err != nil {
+						s.recordProviderCatalogContentSyncRun(startedAt, result, err)
+						return nil, err
+					}
+					// The item endpoint returned no usable profile, but this same
+					// SKU's current catalog entry supplied one. Treat that as a
+					// successful per-SKU fallback rather than a sync failure.
+					if result.TGXProfileFailed > 0 {
+						result.TGXProfileFailed--
+						result.TGXProfilePulled++
+					}
 				}
 			}
 			if !ok || source.containsTelegram() {
@@ -163,8 +183,24 @@ func (s *ProductMappingService) SyncProviderCatalogContentWithClients(
 			}
 		}
 	}
+	if result.TGXProfileFailed == 0 {
+		result.TGXProfileFirstFailure = ""
+	}
 	s.recordProviderCatalogContentSyncRun(startedAt, result, nil)
 	return result, nil
+}
+
+func tgxSourceCommodity(items *upstream.TGXItemsResponse, code string) upstream.TGXCommodity {
+	if items == nil {
+		return upstream.TGXCommodity{}
+	}
+	code = strings.TrimSpace(code)
+	for _, item := range items.Items {
+		if strings.TrimSpace(item.Code) == code {
+			return item
+		}
+	}
+	return upstream.TGXCommodity{}
 }
 
 func providerCatalogContentSources(fansDetails []upstream.FansGurusCatalogDetail, tgxItems *upstream.TGXItemsResponse) map[string]providerCatalogContentSource {
@@ -299,7 +335,7 @@ func providerCatalogContentSourceFromTGXProfile(profile upstream.ProviderCatalog
 	return result
 }
 
-func (s *ProductMappingService) applyTGXCatalogItemProfile(mapping *models.ProductMapping, item upstream.ProviderCatalogItem) (bool, error) {
+func (s *ProductMappingService) applyTGXCatalogProfile(mapping *models.ProductMapping, item upstream.ProviderCatalogItem, source string) (bool, error) {
 	if mapping == nil || mapping.LocalProductID == 0 || mapping.Provider != upstream.CatalogProviderTGX {
 		return false, nil
 	}
@@ -328,7 +364,7 @@ func (s *ProductMappingService) applyTGXCatalogItemProfile(mapping *models.Produ
 			changed = true
 		}
 		if !mapping.ManualFormSchemaLocked {
-			mapping.CatalogProfileSource = "item"
+			mapping.CatalogProfileSource = source
 		}
 		mapping.CatalogProfileSyncedAt = &now
 		return s.mappingRepo.WithTx(tx).Update(mapping)
