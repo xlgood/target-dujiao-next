@@ -343,15 +343,21 @@ func (c *TGXClient) ListItems(ctx context.Context) (*TGXItemsResponse, error) {
 }
 
 func (c *TGXClient) GetItem(ctx context.Context, sharedCode string) (*TGXCommodity, error) {
-	// The single-item endpoint uses snake_case, unlike the legacy inventory
-	// endpoint. Keep this aligned with the documented request contract.
-	values := url.Values{"shared_code": []string{sharedCode}}
-	var result TGXCommodity
+	// The documented item endpoint uses camelCase and returns the same category
+	// structure as the catalog endpoint, narrowed to the requested product.
+	values := url.Values{"sharedCode": []string{sharedCode}}
+	var result TGXItemsResponse
 	if err := c.postForm(ctx, "/commodity/item", values, &result); err != nil {
 		return nil, err
 	}
-	result.Cover = c.resolvePublicURL(result.Cover)
-	return &result, nil
+	for i := range result.Items {
+		if strings.TrimSpace(result.Items[i].Code) != strings.TrimSpace(sharedCode) {
+			continue
+		}
+		result.Items[i].Cover = c.resolvePublicURL(result.Items[i].Cover)
+		return &result.Items[i], nil
+	}
+	return nil, &TGXError{Kind: ErrTGXBusiness, Message: "requested item was not returned"}
 }
 
 func (c *TGXClient) normalizeCommodityCovers(items []TGXCommodity) {

@@ -141,19 +141,24 @@ func TestTGXClientListItemsFlattensDocumentedCategories(t *testing.T) {
 	}
 }
 
-func TestTGXClientGetItemUsesDocumentedSharedCodeParameter(t *testing.T) {
+func TestTGXClientGetItemUsesDocumentedCatalogResponse(t *testing.T) {
 	server := newTGXTestServer(t, func(r *http.Request) interface{} {
 		assertTGXPath(t, r, "/commodity/item")
-		if got := r.FormValue("shared_code"); got != "IG-001" {
-			t.Fatalf("shared_code=%q, want IG-001", got)
+		if got := r.FormValue("sharedCode"); got != "IG-001" {
+			t.Fatalf("sharedCode=%q, want IG-001", got)
 		}
-		if got := r.FormValue("sharedCode"); got != "" {
-			t.Fatalf("legacy sharedCode unexpectedly sent: %q", got)
+		if got := r.FormValue("shared_code"); got != "" {
+			t.Fatalf("shared_code unexpectedly sent: %q", got)
 		}
 		return map[string]interface{}{
 			"code": 200,
-			"data": map[string]interface{}{
-				"code": "IG-001", "name": "Aged account", "price": "100.00",
+			"data": []map[string]interface{}{
+				{
+					"name": "Instagram",
+					"children": []map[string]interface{}{
+						{"code": "IG-001", "name": "Aged account", "price": "100.00"},
+					},
+				},
 			},
 		}
 	})
