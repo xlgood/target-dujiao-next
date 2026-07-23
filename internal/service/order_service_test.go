@@ -96,6 +96,59 @@ func TestResolveManualFormSubmissionFallbackLegacyProductKey(t *testing.T) {
 	}
 }
 
+func TestBuildOrderResultStoresURLRadioAndCheckboxSubmission(t *testing.T) {
+	dsn := fmt.Sprintf("file:order_service_manual_form_types_%d?mode=memory&cache=shared", time.Now().UnixNano())
+	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open sqlite failed: %v", err)
+	}
+	if err := db.AutoMigrate(&models.Category{}, &models.Product{}, &models.ProductSKU{}, &models.Promotion{}); err != nil {
+		t.Fatalf("auto migrate failed: %v", err)
+	}
+
+	category := models.Category{Slug: "manual-form-types", NameJSON: models.JSON{"zh-CN": "测试分类"}}
+	if err := db.Create(&category).Error; err != nil {
+		t.Fatalf("create category: %v", err)
+	}
+	product := models.Product{
+		CategoryID: category.ID, Slug: "manual-form-types-product", TitleJSON: models.JSON{"zh-CN": "测试商品"},
+		PriceAmount: models.NewMoneyFromDecimal(decimal.NewFromInt(10)), PurchaseType: constants.ProductPurchaseMember,
+		FulfillmentType: constants.FulfillmentTypeManual, ManualStockTotal: constants.ManualStockUnlimited, IsActive: true,
+		ManualFormSchemaJSON: models.JSON{"fields": []interface{}{
+			map[string]interface{}{"key": "link", "type": "url", "required": true},
+			map[string]interface{}{"key": "region", "type": "radio", "required": true, "options": []interface{}{"US", "EU"}},
+			map[string]interface{}{"key": "features", "type": "checkbox", "required": true, "options": []interface{}{"A", "B"}},
+		}},
+	}
+	if err := db.Create(&product).Error; err != nil {
+		t.Fatalf("create product: %v", err)
+	}
+	sku := models.ProductSKU{ProductID: product.ID, SKUCode: models.DefaultSKUCode, PriceAmount: models.NewMoneyFromDecimal(decimal.NewFromInt(10)), IsActive: true, ManualStockTotal: constants.ManualStockUnlimited}
+	if err := db.Create(&sku).Error; err != nil {
+		t.Fatalf("create sku: %v", err)
+	}
+
+	svc := NewOrderService(OrderServiceOptions{ProductRepo: repository.NewProductRepository(db), ProductSKURepo: repository.NewProductSKURepository(db), PromotionRepo: repository.NewPromotionRepository(db), ExpireMinutes: 15})
+	result, err := svc.buildOrderResult(orderCreateParams{
+		UserID: 1,
+		Items:  []CreateOrderItem{{ProductID: product.ID, SKUID: sku.ID, Quantity: 1}},
+		ManualFormData: map[string]models.JSON{buildOrderItemKey(product.ID, sku.ID): {
+			"link": " https://example.com/post/1 ", "region": "US", "features": []interface{}{"B", "A", "A"},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("build order result: %v", err)
+	}
+	submission := result.Plans[0].Item.ManualFormSubmissionJSON
+	if submission["link"] != "https://example.com/post/1" || submission["region"] != "US" {
+		t.Fatalf("unexpected submission: %#v", submission)
+	}
+	features, ok := submission["features"].([]string)
+	if !ok || len(features) != 2 || features[0] != "A" || features[1] != "B" {
+		t.Fatalf("unexpected checkbox submission: %#v", submission["features"])
+	}
+}
+
 func TestQuantityForManualCommentsUsesNonEmptyLines(t *testing.T) {
 	if got := quantityForManualComments(99, models.JSON{"comments": " first\n\nsecond\n  "}); got != 2 {
 		t.Fatalf("quantity=%d, want 2", got)
