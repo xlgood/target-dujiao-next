@@ -34,6 +34,7 @@ type publicSKUView struct {
 // publicProductView 内部商品计算结构，装饰完成后转换为 dto.ProductResp
 type publicProductView struct {
 	models.Product
+	Catalog              string
 	PromotionID          *uint
 	PromotionName        string
 	PromotionType        string
@@ -106,6 +107,7 @@ func (v *publicProductView) toProductResp() dto.ProductResp {
 		WholesalePrices:      wholesalePrices,
 		Images:               v.Product.Images,
 		Tags:                 sanitizePublicProductTags(v.Product.Tags),
+		Catalog:              v.Catalog,
 		PurchaseType:         v.Product.PurchaseType,
 		MinPurchaseQuantity:  v.Product.MinPurchaseQuantity,
 		MaxPurchaseQuantity:  v.Product.MaxPurchaseQuantity,
@@ -360,7 +362,6 @@ func (h *Handler) GetConfig(c *gin.Context) {
 		shared.RespondError(c, response.CodeInternal, "error.config_fetch_failed", err)
 		return
 	}
-
 	publicChannels, err := h.PaymentService.GetAvailableChannels(service.AvailablePaymentChannelFilter{
 		PaymentType: constants.PaymentTypeOrder,
 	})
@@ -524,9 +525,10 @@ func (h *Handler) GetProducts(c *gin.Context) {
 	// 获取筛选参数
 	categoryID := c.Query("category_id")
 	search := strings.TrimSpace(c.Query("search"))
+	catalog := normalizePublicCatalog(c.Query("catalog"))
 	tenant := tenantFromRequest(c)
 
-	products, total, err := h.ProductService.ListPublicForTenant(tenant, h.ResellerRepo, categoryID, search, page, pageSize)
+	products, total, err := h.ProductService.ListPublicByCatalogForTenant(catalog, tenant, h.ResellerRepo, categoryID, search, page, pageSize)
 	if err != nil {
 		shared.RespondError(c, response.CodeInternal, "error.product_fetch_failed", err)
 		return
@@ -657,7 +659,7 @@ func (h *Handler) decoratePublicProduct(product *models.Product, promotionServic
 		return dto.ProductResp{}, nil
 	}
 
-	item := publicProductView{Product: *product}
+	item := publicProductView{Product: *product, Catalog: h.publicCatalogForProduct(product)}
 	displayPrice := resolvePublicDisplayPrice(product)
 	displaySKUID := resolvePublicDisplaySKUID(product)
 	item.Product.PriceAmount = displayPrice
@@ -799,7 +801,7 @@ func (h *Handler) decoratePublicProductForTenant(
 	}
 	productCopy.SKUs = filteredSKUs
 
-	item := publicProductView{Product: productCopy}
+	item := publicProductView{Product: productCopy, Catalog: h.publicCatalogForProduct(product)}
 	h.decorateProductStock(&productCopy, &item)
 	skuViews := make([]publicSKUView, 0, len(productCopy.SKUs))
 	for _, sku := range productCopy.SKUs {
@@ -1111,13 +1113,40 @@ func (h *Handler) GetPostBySlug(c *gin.Context) {
 
 // GetCategories 获取分类列表
 func (h *Handler) GetCategories(c *gin.Context) {
-	categories, err := h.CategoryService.ListActive()
+	categories, err := h.CategoryService.ListActiveByCatalog(normalizePublicCatalog(c.Query("catalog")))
 	if err != nil {
 		shared.RespondError(c, response.CodeInternal, "error.category_fetch_failed", err)
 		return
 	}
 
 	response.Success(c, dto.NewCategoryRespList(categories))
+}
+
+func normalizePublicCatalog(raw string) string {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "accounts", "services":
+		return strings.ToLower(strings.TrimSpace(raw))
+	default:
+		return ""
+	}
+}
+
+func (h *Handler) publicCatalogForProduct(product *models.Product) string {
+	if h == nil || h.Container == nil || h.ProductMappingRepo == nil || product == nil || product.ID == 0 {
+		return ""
+	}
+	mapping, err := h.ProductMappingRepo.GetByLocalProductID(product.ID)
+	if err != nil || mapping == nil || !mapping.IsActive {
+		return ""
+	}
+	switch strings.ToLower(strings.TrimSpace(mapping.Provider)) {
+	case "tgx":
+		return "accounts"
+	case "fansgurus":
+		return "services"
+	default:
+		return ""
+	}
 }
 
 // CreateGuestOrderRequest 游客下单请求

@@ -17,10 +17,56 @@ func setupCategoryRepositoryTest(t *testing.T) *GormCategoryRepository {
 	if err != nil {
 		t.Fatalf("open sqlite failed: %v", err)
 	}
-	if err := db.AutoMigrate(&models.Category{}); err != nil {
+	if err := db.AutoMigrate(&models.Category{}, &models.Product{}, &models.SiteConnection{}, &models.ProductMapping{}); err != nil {
 		t.Fatalf("migrate category failed: %v", err)
 	}
 	return NewCategoryRepository(db)
+}
+
+func TestCategoryRepositoryListActiveByCatalog(t *testing.T) {
+	repo := setupCategoryRepositoryTest(t)
+	db := repo.db
+
+	accounts := &models.Category{Slug: "accounts", NameJSON: models.JSON{"zh-CN": "账号"}, IsActive: true}
+	services := &models.Category{Slug: "services", NameJSON: models.JSON{"zh-CN": "服务"}, IsActive: true}
+	if err := db.Create(accounts).Error; err != nil {
+		t.Fatalf("create accounts category: %v", err)
+	}
+	if err := db.Create(services).Error; err != nil {
+		t.Fatalf("create services category: %v", err)
+	}
+
+	accountProduct := &models.Product{CategoryID: accounts.ID, Slug: "account-product", TitleJSON: models.JSON{"zh-CN": "账号商品"}, IsActive: true}
+	serviceProduct := &models.Product{CategoryID: services.ID, Slug: "service-product", TitleJSON: models.JSON{"zh-CN": "服务商品"}, IsActive: true}
+	for _, product := range []*models.Product{accountProduct, serviceProduct} {
+		if err := db.Create(product).Error; err != nil {
+			t.Fatalf("create product: %v", err)
+		}
+	}
+	for _, mapping := range []models.ProductMapping{
+		{LocalProductID: accountProduct.ID, ConnectionID: 1, Provider: "tgx", IsActive: true},
+		{LocalProductID: serviceProduct.ID, ConnectionID: 1, Provider: "fansgurus", IsActive: true},
+	} {
+		if err := db.Create(&mapping).Error; err != nil {
+			t.Fatalf("create mapping: %v", err)
+		}
+	}
+
+	accountCategories, err := repo.ListActiveByCatalog("accounts")
+	if err != nil {
+		t.Fatalf("list account categories: %v", err)
+	}
+	if len(accountCategories) != 1 || accountCategories[0].ID != accounts.ID {
+		t.Fatalf("account categories=%+v, want only %d", accountCategories, accounts.ID)
+	}
+
+	serviceCategories, err := repo.ListActiveByCatalog("services")
+	if err != nil {
+		t.Fatalf("list service categories: %v", err)
+	}
+	if len(serviceCategories) != 1 || serviceCategories[0].ID != services.ID {
+		t.Fatalf("service categories=%+v, want only %d", serviceCategories, services.ID)
+	}
 }
 
 func TestCategoryRepositoryListSortOrderDescending(t *testing.T) {

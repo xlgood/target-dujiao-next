@@ -36,6 +36,10 @@ func (s *CategoryService) ListActive() ([]models.Category, error) {
 	return s.repo.ListActive()
 }
 
+func (s *CategoryService) ListActiveByCatalog(catalog string) ([]models.Category, error) {
+	return s.repo.ListActiveByCatalog(catalog)
+}
+
 // SetActive 切换分类启用状态
 func (s *CategoryService) SetActive(id string, active bool) (*models.Category, error) {
 	category, err := s.repo.GetByID(id)

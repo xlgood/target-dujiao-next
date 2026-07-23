@@ -153,6 +153,16 @@ type ProductSKUInput struct {
 
 // ListPublic 获取公开商品列表
 func (s *ProductService) ListPublic(categoryID, search string, page, pageSize int) ([]models.Product, int64, error) {
+	return s.listPublic("", categoryID, search, page, pageSize)
+}
+
+// ListPublicByCatalog returns a public catalog lane without exposing its
+// internal procurement source to callers or customers.
+func (s *ProductService) ListPublicByCatalog(catalog, categoryID, search string, page, pageSize int) ([]models.Product, int64, error) {
+	return s.listPublic(catalog, categoryID, search, page, pageSize)
+}
+
+func (s *ProductService) listPublic(catalog, categoryID, search string, page, pageSize int) ([]models.Product, int64, error) {
 	categoryIDs, err := expandPublicCategoryIDs(s.categoryRepo, categoryID)
 	if err != nil {
 		return nil, 0, err
@@ -163,6 +173,7 @@ func (s *ProductService) ListPublic(categoryID, search string, page, pageSize in
 		PageSize:     pageSize,
 		CategoryID:   categoryID,
 		CategoryIDs:  categoryIDs,
+		Catalog:      catalog,
 		Search:       search,
 		OnlyActive:   true,
 		WithCategory: true,
@@ -172,8 +183,18 @@ func (s *ProductService) ListPublic(categoryID, search string, page, pageSize in
 
 // ListPublicForTenant 获取当前租户上下文的公开商品列表。
 func (s *ProductService) ListPublicForTenant(tenant TenantContext, resellerRepo repository.ResellerRepository, categoryID, search string, page, pageSize int) ([]models.Product, int64, error) {
+	return s.listPublicForTenant("", tenant, resellerRepo, categoryID, search, page, pageSize)
+}
+
+// ListPublicByCatalogForTenant applies the same public catalog lane to the
+// main site and reseller storefronts.
+func (s *ProductService) ListPublicByCatalogForTenant(catalog string, tenant TenantContext, resellerRepo repository.ResellerRepository, categoryID, search string, page, pageSize int) ([]models.Product, int64, error) {
+	return s.listPublicForTenant(catalog, tenant, resellerRepo, categoryID, search, page, pageSize)
+}
+
+func (s *ProductService) listPublicForTenant(catalog string, tenant TenantContext, resellerRepo repository.ResellerRepository, categoryID, search string, page, pageSize int) ([]models.Product, int64, error) {
 	if !isResellerOrderContext(tenant) {
-		return s.ListPublic(categoryID, search, page, pageSize)
+		return s.ListPublicByCatalog(catalog, categoryID, search, page, pageSize)
 	}
 	if tenant.ResellerID == nil || resellerRepo == nil {
 		return nil, 0, ErrResellerProductNotListed
@@ -191,6 +212,7 @@ func (s *ProductService) ListPublicForTenant(tenant TenantContext, resellerRepo 
 		PageSize:          pageSize,
 		CategoryID:        categoryID,
 		CategoryIDs:       categoryIDs,
+		Catalog:           catalog,
 		Search:            search,
 		OnlyActive:        true,
 		WithCategory:      true,

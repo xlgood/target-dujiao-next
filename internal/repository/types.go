@@ -19,6 +19,9 @@ type ProductListFilter struct {
 	PageSize                       int
 	CategoryID                     string
 	CategoryIDs                    []uint
+	// Catalog is a customer-facing catalog lane. The repository maps it to an
+	// internal provider relation so the public API never reveals provider names.
+	Catalog                        string
 	ExcludeProductIDs              []uint
 	Search                         string
 	FulfillmentType                string

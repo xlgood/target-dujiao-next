@@ -500,7 +500,7 @@ const (
 const (
 	StorefrontTemplateClassic = "classic"
 	StorefrontTemplateVault   = "vault"
-	StorefrontTemplateDefault = StorefrontTemplateClassic
+	StorefrontTemplateDefault = StorefrontTemplateVault
 )
 
 // 站点语言常量

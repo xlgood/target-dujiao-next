@@ -308,7 +308,7 @@ func (s *ProductMappingService) findOrCreateProviderCategory(platform string) (*
 	if err != nil || category != nil {
 		return category, err
 	}
-	category = &models.Category{Slug: slug, NameJSON: localizedText(platform), IsActive: true}
+	category = &models.Category{Slug: slug, NameJSON: localizedText(platform), Icon: models.ProviderCatalogImagePath(platform), IsActive: true}
 	if err := s.categoryRepo.Create(category); err != nil {
 		return nil, err
 	}

@@ -20,6 +20,9 @@ type ProductResp struct {
 	WholesalePrices      []WholesalePriceResp `json:"wholesale_prices,omitempty"`
 	Images               models.StringArray   `json:"images"`
 	Tags                 models.StringArray   `json:"tags"`
+	// Catalog describes the customer-facing purchase flow (accounts/services),
+	// never the internal provider that fulfils it.
+	Catalog              string               `json:"catalog,omitempty"`
 	PurchaseType         string               `json:"purchase_type"`
 	MinPurchaseQuantity  int                  `json:"min_purchase_quantity"`
 	MaxPurchaseQuantity  int                  `json:"max_purchase_quantity"`

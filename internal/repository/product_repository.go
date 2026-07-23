@@ -73,6 +73,13 @@ func (r *GormProductRepository) List(filter ProductListFilter) ([]models.Product
 	} else if filter.CategoryID != "" {
 		query = query.Where("category_id = ?", filter.CategoryID)
 	}
+	if provider := catalogProvider(filter.Catalog); provider != "" {
+		query = query.Where(
+			"EXISTS (SELECT 1 FROM product_mappings pm WHERE pm.local_product_id = products.id AND pm.deleted_at IS NULL AND pm.is_active = ? AND pm.provider = ?)",
+			true,
+			provider,
+		)
+	}
 	if len(filter.ExcludeProductIDs) > 0 {
 		query = query.Where("products.id NOT IN ?", filter.ExcludeProductIDs)
 	}
@@ -128,6 +135,19 @@ func (r *GormProductRepository) List(filter ProductListFilter) ([]models.Product
 	}
 
 	return products, total, nil
+}
+
+// catalogProvider keeps provider implementation names at the repository
+// boundary. Callers only use the public account/service catalog vocabulary.
+func catalogProvider(catalog string) string {
+	switch strings.ToLower(strings.TrimSpace(catalog)) {
+	case "accounts":
+		return "tgx"
+	case "services":
+		return "fansgurus"
+	default:
+		return ""
+	}
 }
 
 func applyStockStatusFilter(query *gorm.DB, status string, lowStockThreshold int) *gorm.DB {

@@ -12,6 +12,7 @@ import (
 type CategoryRepository interface {
 	List() ([]models.Category, error)
 	ListActive() ([]models.Category, error)
+	ListActiveByCatalog(catalog string) ([]models.Category, error)
 	GetByID(id string) (*models.Category, error)
 	Create(category *models.Category) error
 	Update(category *models.Category) error
@@ -49,6 +50,28 @@ func (r *GormCategoryRepository) List() ([]models.Category, error) {
 func (r *GormCategoryRepository) ListActive() ([]models.Category, error) {
 	var categories []models.Category
 	if err := r.db.Where("is_active = ?", true).Order("sort_order DESC, id ASC").Find(&categories).Error; err != nil {
+		return nil, err
+	}
+	return categories, nil
+}
+
+// ListActiveByCatalog limits the visible taxonomy to categories that have a
+// published item in the requested customer-facing catalog lane.
+func (r *GormCategoryRepository) ListActiveByCatalog(catalog string) ([]models.Category, error) {
+	provider := catalogProvider(catalog)
+	if provider == "" {
+		return r.ListActive()
+	}
+	var categories []models.Category
+	query := r.db.Where("categories.is_active = ?", true).
+		Where(
+			"EXISTS (SELECT 1 FROM products p JOIN product_mappings pm ON pm.local_product_id = p.id AND pm.deleted_at IS NULL AND pm.is_active = ? AND pm.provider = ? WHERE p.category_id = categories.id AND p.deleted_at IS NULL AND p.is_active = ?)",
+			true,
+			provider,
+			true,
+		).
+		Order("sort_order DESC, id ASC")
+	if err := query.Find(&categories).Error; err != nil {
 		return nil, err
 	}
 	return categories, nil

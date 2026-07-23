@@ -111,6 +111,37 @@ func TestListExcludesProviderCatalogExcludedCategoryWhenRequested(t *testing.T) 
 	}
 }
 
+func TestListFiltersProductsByPublicCatalog(t *testing.T) {
+	repo, db := setupProductRepositoryTest(t)
+	account := createManualProduct(t, repo, "account-catalog-product", 1, 0, 0)
+	service := createManualProduct(t, repo, "service-catalog-product", 1, 0, 0)
+
+	for _, mapping := range []models.ProductMapping{
+		{LocalProductID: account.ID, ConnectionID: 1, Provider: "tgx", IsActive: true},
+		{LocalProductID: service.ID, ConnectionID: 1, Provider: "fansgurus", IsActive: true},
+	} {
+		if err := db.Create(&mapping).Error; err != nil {
+			t.Fatalf("create product mapping: %v", err)
+		}
+	}
+
+	accounts, accountTotal, err := repo.List(ProductListFilter{Catalog: "accounts", OnlyActive: true, Page: 1, PageSize: 20})
+	if err != nil {
+		t.Fatalf("list account catalog: %v", err)
+	}
+	if accountTotal != 1 || len(accounts) != 1 || accounts[0].ID != account.ID {
+		t.Fatalf("accounts=%+v total=%d, want only product %d", accounts, accountTotal, account.ID)
+	}
+
+	services, serviceTotal, err := repo.List(ProductListFilter{Catalog: "services", OnlyActive: true, Page: 1, PageSize: 20})
+	if err != nil {
+		t.Fatalf("list service catalog: %v", err)
+	}
+	if serviceTotal != 1 || len(services) != 1 || services[0].ID != service.ID {
+		t.Fatalf("services=%+v total=%d, want only product %d", services, serviceTotal, service.ID)
+	}
+}
+
 func createAutoProduct(t *testing.T, repo *GormProductRepository, slug string) *models.Product {
 	t.Helper()
 	product := &models.Product{

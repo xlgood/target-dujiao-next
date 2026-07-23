@@ -522,12 +522,18 @@ func findOrCreateProviderCategoryTx(tx *gorm.DB, platform string) (*models.Categ
 			return nil, err
 		}
 		category = models.Category{
-			Slug:     slug,
-			NameJSON: localizedText(platform),
-			IsActive: true,
+			Slug:      slug,
+			NameJSON:  localizedText(platform),
+			Icon:      models.ProviderCatalogImagePath(platform),
+			IsActive:  true,
 		}
 		if err := tx.Create(&category).Error; err != nil {
 			return nil, fmt.Errorf("create provider category: %w", err)
+		}
+	} else if strings.TrimSpace(category.Icon) == "" {
+		category.Icon = models.ProviderCatalogImagePath(platform)
+		if err := tx.Model(&models.Category{}).Where("id = ?", category.ID).Update("icon", category.Icon).Error; err != nil {
+			return nil, fmt.Errorf("set provider category cover: %w", err)
 		}
 	}
 	return &category, nil
